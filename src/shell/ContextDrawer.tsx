@@ -26,7 +26,7 @@ export function ContextDrawer() {
   return (
     <>
       <div
-        className="fixed inset-0 z-40 bg-ink-teal/30"
+        className="fixed inset-0 z-40 bg-ink-teal/40 backdrop-blur-[1px]"
         onClick={closeDrawer}
         aria-hidden="true"
       />
@@ -36,9 +36,9 @@ export function ContextDrawer() {
         role="dialog"
         aria-modal="true"
         aria-label={drawer.title}
-        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[460px] flex-col bg-surface shadow-2xl outline-none"
+        className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-hairline bg-surface-elevated shadow-lg outline-none md:max-w-[460px]"
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-hairline px-6 py-5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-hairline bg-surface px-6 py-5">
           <div>
             <h2 className="font-display text-lg font-normal text-body">
               {drawer.title}
@@ -51,7 +51,7 @@ export function ContextDrawer() {
             type="button"
             onClick={closeDrawer}
             aria-label="Close panel"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-canvas hover:text-body"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-hover hover:text-body"
           >
             <CloseIcon className="h-4 w-4" />
           </button>

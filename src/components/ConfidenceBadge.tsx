@@ -19,9 +19,9 @@ const CONFIG: Record<
   },
   low: {
     label: 'Low confidence',
-    dot: 'bg-pulse',
-    text: 'text-pulse',
-    bg: 'bg-pulse/12',
+    dot: 'bg-critical',
+    text: 'text-critical',
+    bg: 'bg-critical/12',
   },
 }
 
@@ -39,9 +39,9 @@ export function ConfidenceBadge({
   const badge = (
     <span
       tabIndex={score !== undefined ? 0 : undefined}
-      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium outline-none ${c.bg} ${c.text}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold outline-none ${c.bg} ${c.text}`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${c.dot}`} aria-hidden="true" />
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.dot}`} aria-hidden="true" />
       {c.label}
     </span>
   )

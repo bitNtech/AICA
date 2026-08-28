@@ -4,12 +4,22 @@ import { EmptyState } from './components/EmptyState'
 import { Dashboard } from './pages/Dashboard'
 import { LiveCallsPage } from './pages/LiveCallsPage'
 import { CallLogPage } from './pages/CallLogPage'
-import { primaryNav } from './data/mock'
+import { KnowledgeBasePage } from './pages/KnowledgeBasePage'
+import { AgentBuilderPage } from './pages/AgentBuilderPage'
+import { SimulationPage } from './pages/SimulationPage'
+import { RolloutPage } from './pages/RolloutPage'
+import { ImprovementFeedPage } from './pages/ImprovementFeedPage'
+import { DataReadinessPage } from './pages/DataReadinessPage'
+import { CompliancePage } from './pages/CompliancePage'
+import { IntegrationsPage } from './pages/IntegrationsPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { footerNav, primaryNav } from './data/mock'
 
 function App() {
   const [activeNavId, setActiveNavId] = useState('dashboard')
   const activeLabel =
-    primaryNav.find((n) => n.id === activeNavId)?.label ?? 'Dashboard'
+    [...primaryNav, ...footerNav].find((n) => n.id === activeNavId)?.label ??
+    'Dashboard'
 
   return (
     <AppShell
@@ -38,6 +48,24 @@ function Page({
       return <LiveCallsPage />
     case 'call-log':
       return <CallLogPage />
+    case 'knowledge-base':
+      return <KnowledgeBasePage />
+    case 'agent-builder':
+      return <AgentBuilderPage />
+    case 'simulation':
+      return <SimulationPage />
+    case 'rollout':
+      return <RolloutPage />
+    case 'improvement-feed':
+      return <ImprovementFeedPage />
+    case 'data-readiness':
+      return <DataReadinessPage />
+    case 'compliance':
+      return <CompliancePage />
+    case 'integrations':
+      return <IntegrationsPage />
+    case 'settings':
+      return <SettingsPage />
     default:
       return (
         <EmptyState

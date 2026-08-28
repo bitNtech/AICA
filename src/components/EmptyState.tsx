@@ -15,11 +15,11 @@ export function EmptyState({
   onAction,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-hairline bg-surface/60 px-8 py-16 text-center">
+    <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-hairline bg-surface/50 px-8 py-16 text-center">
       <PulseLine
         mode="idle"
         height={40}
-        className="w-40 text-muted"
+        className="w-40 text-pulse/60"
         aria-label="Idle"
       />
       <div>
@@ -29,11 +29,7 @@ export function EmptyState({
         </p>
       </div>
       {actionLabel && onAction && (
-        <button
-          type="button"
-          onClick={onAction}
-          className="rounded-lg bg-pulse px-4 py-2 text-sm font-semibold text-white transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md"
-        >
+        <button type="button" onClick={onAction} className="btn-primary !px-5">
           {actionLabel}
         </button>
       )}

@@ -11,8 +11,8 @@ import type { CallLogEntry, CallOutcome, ConfidenceLevel } from '../types'
 const OUTCOME_STYLE: Record<CallOutcome, string> = {
   resolved: 'bg-sage/12 text-sage',
   redirected: 'bg-amber/15 text-amber',
-  voicemail: 'bg-muted/12 text-muted',
-  no_answer_redirect: 'bg-pulse/12 text-pulse',
+  voicemail: 'bg-signal/12 text-signal',
+  no_answer_redirect: 'bg-critical/12 text-critical',
 }
 
 type SortKey = 'timestamp' | 'durationSec'
@@ -61,13 +61,14 @@ export function CallLogPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
         <input
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by caller or intent…"
-          className="w-64 rounded-lg border border-hairline bg-surface px-3 py-1.5 text-sm text-body placeholder:text-muted focus:outline-none"
+          className="input w-64"
         />
         <FilterSelect
           value={outcomeFilter}
@@ -90,6 +91,10 @@ export function CallLogPage() {
             { value: 'low', label: 'Low confidence' },
           ]}
         />
+        </div>
+        <p className="font-mono text-xs text-faint">
+          {rows.length} {rows.length === 1 ? 'call' : 'calls'}
+        </p>
       </div>
 
       {rows.length === 0 ? (
@@ -104,10 +109,10 @@ export function CallLogPage() {
           }}
         />
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-hairline bg-surface">
+        <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-hairline text-xs text-muted">
+              <tr className="border-b border-hairline bg-surface-elevated text-xs text-muted">
                 <SortableHeader
                   label="Time"
                   active={sortKey === 'timestamp'}
@@ -132,7 +137,7 @@ export function CallLogPage() {
                 <tr
                   key={entry.id}
                   onClick={() => openDetail(entry)}
-                  className="cursor-pointer hover:bg-canvas"
+                  className="cursor-pointer hover:bg-surface-hover"
                 >
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
                     {formatRelativeTime(entry.timestamp)}
@@ -213,7 +218,7 @@ function FilterSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="rounded-lg border border-hairline bg-surface px-2.5 py-1.5 text-sm text-body focus:outline-none"
+      className="rounded-full border border-hairline bg-surface px-3.5 py-1.5 text-sm text-body transition-colors focus:border-pulse/50 focus:outline-none"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>

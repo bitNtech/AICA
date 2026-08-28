@@ -4,10 +4,13 @@ import { mockOrg } from '../data/mock'
 import { ChevronDownIcon, MoonIcon, SearchIcon, SunIcon } from '../components/icons'
 import { applyTheme, getStoredTheme, type Theme } from '../lib/theme'
 
-const STATUS_CONFIG: Record<AgentStatus, { label: string; dot: string }> = {
-  answering: { label: 'AICA is answering', dot: 'bg-sage' },
-  paused: { label: 'AICA is paused', dot: 'bg-amber' },
-  degraded: { label: 'Degraded — check integrations', dot: 'bg-pulse' },
+const STATUS_CONFIG: Record<
+  AgentStatus,
+  { label: string; sub: string; dot: string }
+> = {
+  answering: { label: 'AICA is answering', sub: 'All systems operational', dot: 'bg-sage' },
+  paused: { label: 'AICA is paused', sub: 'No calls are being answered', dot: 'bg-amber' },
+  degraded: { label: 'Degraded', sub: 'Check integrations', dot: 'bg-critical' },
 }
 
 interface TopBarProps {
@@ -29,33 +32,42 @@ export function TopBar({ title, liveCallCount, agentStatus }: TopBarProps) {
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-hairline bg-surface px-6">
-      <h1 className="font-display text-xl font-normal text-body">{title}</h1>
+    <header className="relative z-10 flex h-16 shrink-0 items-center gap-3 border-b border-hairline bg-surface px-4 sm:px-6">
+      <h1 className="shrink-0 truncate font-display text-xl font-normal text-body">{title}</h1>
 
-      <div className="flex items-center gap-2 rounded-full bg-pulse/10 px-3 py-1 text-sm font-medium text-pulse">
-        <span className="h-1.5 w-1.5 rounded-full bg-pulse" aria-hidden="true" />
+      <div className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-pulse/10 px-3 py-1 text-sm font-medium text-pulse lg:flex">
+        <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden="true">
+          {liveCallCount > 0 && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pulse opacity-60" />
+          )}
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-pulse" />
+        </span>
         {liveCallCount} live {liveCallCount === 1 ? 'call' : 'calls'}
       </div>
 
-      <div className="flex items-center gap-2 rounded-full bg-canvas px-3 py-1 text-sm font-medium text-muted">
-        <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} aria-hidden="true" />
-        {status.label}
+      <div className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-hairline bg-canvas px-3 py-1 text-sm text-body xl:flex">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status.dot}`} aria-hidden="true" />
+        <span className="font-medium">{status.label}</span>
+        <span className="hidden text-xs text-faint lg:inline">· {status.sub}</span>
       </div>
 
       <div className="ml-auto flex items-center gap-3">
-        <label className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+        <label className="group relative hidden sm:block">
+          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
           <input
             type="search"
-            placeholder="Search calls, documents..."
-            className="w-64 rounded-lg border border-hairline bg-canvas py-1.5 pl-8 pr-3 text-sm text-body placeholder:text-muted focus:outline-none"
+            placeholder="Search calls, patients, documents…"
+            className="w-52 rounded-full border border-hairline bg-canvas py-1.5 pl-9 pr-12 text-sm text-body placeholder:text-faint transition-[width,border-color] duration-150 focus:w-72 focus:border-pulse/50 focus:outline-none lg:w-64 lg:focus:w-80"
           />
+          <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded border border-hairline bg-surface px-1.5 py-0.5 font-mono text-[10px] text-faint md:inline-flex">
+            ⌘K
+          </kbd>
         </label>
         <button
           type="button"
           onClick={toggleTheme}
           aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-hairline text-muted hover:text-body"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline text-muted transition-colors hover:border-pulse/40 hover:text-pulse"
         >
           {theme === 'dark' ? <SunIcon className="h-4 w-4" /> : <MoonIcon className="h-4 w-4" />}
         </button>
@@ -84,7 +96,7 @@ function OrgMenu() {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-lg border border-hairline py-1 pl-1 pr-2 hover:bg-canvas"
+        className="flex items-center gap-2 rounded-full border border-hairline py-1 pl-1 pr-2.5 transition-colors hover:border-pulse/30 hover:bg-surface-hover"
       >
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink-teal text-[11px] font-semibold text-mist">
           {mockOrg.initials}
@@ -92,13 +104,17 @@ function OrgMenu() {
         <span className="hidden max-w-[140px] truncate text-sm font-medium text-body sm:inline">
           {mockOrg.name}
         </span>
-        <ChevronDownIcon className="h-3.5 w-3.5 text-muted" />
+        <ChevronDownIcon className="h-3.5 w-3.5 text-faint" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-lg border border-hairline bg-surface py-1.5 shadow-lg">
-          <p className="truncate px-3 py-1.5 text-xs font-medium text-muted">
+        <div className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-hairline bg-surface-elevated py-1.5 shadow-lg">
+          <p className="truncate px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wider text-faint">
+            Workspace
+          </p>
+          <p className="truncate px-3 pb-2 text-sm font-medium text-body">
             {mockOrg.name}
           </p>
+          <div className="mx-1.5 mb-1.5 border-t border-hairline" />
           <MenuItem label="Compliance & Audit" />
           <MenuItem label="Integrations" />
           <MenuItem label="Settings" />
@@ -112,7 +128,7 @@ function MenuItem({ label }: { label: string }) {
   return (
     <button
       type="button"
-      className="block w-full px-3 py-1.5 text-left text-sm text-body hover:bg-canvas"
+      className="mx-1.5 block w-[calc(100%-12px)] rounded-lg px-3 py-1.5 text-left text-sm text-body hover:bg-surface-hover"
     >
       {label}
     </button>

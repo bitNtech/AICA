@@ -1,0 +1,1664 @@
+I want you to redesign and significantly improve the frontend UI/UX of my existing application.
+
+PROJECT:
+AICA — AI Call Attending / AI Front Desk Console
+
+CURRENT STATE:
+The application already has a functional frontend and the overall information architecture is good. However, the current visual design is too bland, monochromatic, low-contrast, and visually flat.
+
+I have provided a screenshot of the current dashboard as the visual reference.
+
+The current UI uses mostly dark green/gray surfaces with subtle borders and muted text. Almost everything has similar contrast and brightness, which makes the interface feel flat and less polished.
+
+IMPORTANT:
+Do NOT throw away the existing application or rebuild the project from scratch.
+Do NOT break existing functionality, routing, API calls, state management, components, or business logic.
+
+Your job is primarily to redesign and improve the frontend presentation, visual hierarchy, UX, components, and styling while preserving the existing functionality.
+
+--------------------------------------------------
+1. DESIGN DIRECTION
+--------------------------------------------------
+
+Transform the UI into a:
+
+- Premium AI SaaS dashboard
+- Healthcare operations console
+- Modern voice-AI platform
+- High-end enterprise product
+- Visually rich but NOT flashy
+- Professional enough for a hospital/clinic
+- Clearly AI-powered
+- Information-dense without feeling cluttered
+
+Think:
+
+"Linear + Vercel + modern healthcare SaaS + AI operations center"
+
+but with its own visual identity.
+
+The UI should feel:
+
+- intelligent
+- trustworthy
+- premium
+- modern
+- calm
+- responsive
+- operational
+- data-driven
+- slightly futuristic
+
+Avoid making it look like:
+- a generic admin dashboard
+- a Bootstrap template
+- a basic Tailwind dashboard
+- a crypto dashboard
+- a gaming UI
+- an overly neon cyberpunk interface
+
+--------------------------------------------------
+2. MOST IMPORTANT ISSUE: COLOR CONTRAST
+--------------------------------------------------
+
+The biggest problem with the current design is insufficient contrast between surfaces.
+
+Do NOT use one nearly identical dark green color for:
+
+- page background
+- sidebar
+- cards
+- secondary cards
+- borders
+- navigation
+- input fields
+
+Create clear visual layers.
+
+Use a dark premium color system approximately like:
+
+Page background:
+#0B1110 / very dark charcoal-green
+
+Sidebar:
+#101917
+
+Primary surface:
+#16211D
+
+Elevated surface:
+#1C2924
+
+Hover surface:
+#23332D
+
+Border:
+#30423A
+
+Primary text:
+#F2F4EE
+
+Secondary text:
+#AAB7AF
+
+Muted text:
+#718078
+
+Primary accent:
+#6EE7B7 / emerald-mint
+
+Secondary accent:
+#67E8F9 / cyan
+
+Positive:
+#4ADE80
+
+Warning:
+#FBBF24
+
+Danger:
+#FB7185
+
+Info:
+#60A5FA
+
+Do NOT apply these colors randomly.
+
+Colors must communicate meaning.
+
+For example:
+
+Green = healthy / successful / completed
+Amber = attention / pending / needs review
+Red/coral = error / failed / urgent
+Blue/cyan = information / AI activity / system activity
+Purple = AI intelligence / automation / insights where appropriate
+
+--------------------------------------------------
+3. VISUAL HIERARCHY
+--------------------------------------------------
+
+Every section should have a clear hierarchy.
+
+The current dashboard has cards that visually blend into one another.
+
+Improve this by using:
+
+- stronger surface differentiation
+- slightly brighter cards
+- meaningful borders
+- subtle shadows
+- better typography
+- larger numerical metrics
+- accent indicators
+- icons
+- status badges
+- small charts
+- gradients used sparingly
+
+Do NOT simply increase brightness everywhere.
+
+Contrast should be intentional.
+
+--------------------------------------------------
+4. DASHBOARD REDESIGN
+--------------------------------------------------
+
+Redesign the main dashboard.
+
+Current sections include:
+
+- Calls answered today
+- Resolved without redirect
+- Matched-or-beat front-desk score
+- Live activity
+- Needs your attention
+- Active calls
+
+Preserve these concepts but redesign their presentation.
+
+--------------------------------------------------
+5. TOP METRIC CARDS
+--------------------------------------------------
+
+Create premium KPI cards.
+
+Example:
+
+CALLS ANSWERED TODAY
+
+128
++14 vs yesterday
+
+Include:
+- large number
+- trend indicator
+- comparison text
+- small sparkline / mini bar chart
+- appropriate icon
+- subtle accent
+
+The number should be the visual focal point.
+
+Do NOT make the entire card bright.
+
+Instead, use a subtle accent line/glow/icon treatment.
+
+Example layout:
+
+[phone icon] Calls answered
+             128
+             ↑ 14 vs yesterday
+             ▁▃▅▂▃▆▇
+
+--------------------------------------------------
+
+For percentage metrics such as:
+
+Resolved without redirect
+81%
+
+Matched-or-beat front-desk score
+91%
+
+Use more attractive visualizations.
+
+Possibilities:
+
+- circular progress
+- segmented ring
+- radial progress
+- progress arc
+
+But make them visually refined.
+
+Do not use giant generic donut charts.
+
+Add supporting context underneath:
+
+81%
++3.0 pts this week
+
+"Above target" / "Target: 78%"
+
+This makes the dashboard more insightful.
+
+--------------------------------------------------
+6. ADD TARGET / BENCHMARK CONTEXT
+--------------------------------------------------
+
+The dashboard should not only show raw numbers.
+
+Where appropriate, communicate:
+
+Current:
+81%
+
+Target:
+78%
+
+Difference:
++3 pts
+
+This immediately makes the dashboard more useful.
+
+For example:
+
+Resolved without redirect
+81%
+
+Target 78%
++3.0 pts this week
+
+[progress indicator]
+
+Similarly:
+
+Front-desk score
+91%
+
+Target 88%
++3.0 pts
+
+This makes the UI feel like an actual operations product rather than a static dashboard.
+
+--------------------------------------------------
+7. LIVE CALLS SHOULD FEEL "LIVE"
+--------------------------------------------------
+
+The current "Live activity" cards are too static.
+
+Make active calls visually communicate that they are happening right now.
+
+For each active call show:
+
+- call title
+- caller intent
+- call duration
+- AI confidence
+- current state
+- waveform / activity visualization
+- AI speaking/listening state
+- escalation status
+
+Example:
+
+● LIVE
+
+Rescheduling
+Room 3
+
+AI confidence
+96%
+
+1:17
+
+[animated waveform]
+
+Listening...
+
+Use subtle animation.
+
+Do NOT use excessive animations.
+
+Possible states:
+
+Listening
+Speaking
+Thinking
+Transferring
+Waiting
+Needs review
+
+Each state should have a visually distinct indicator.
+
+--------------------------------------------------
+8. AI ACTIVITY VISUALIZATION
+--------------------------------------------------
+
+Because this is an AI CALL ATTENDING platform, the interface should visually communicate AI activity.
+
+Introduce subtle AI indicators such as:
+
+- animated waveform
+- pulse indicator
+- AI processing indicator
+- voice activity bars
+- confidence meter
+- intent classification
+- real-time transcription preview
+
+For example:
+
+AI is listening
+● ● ● ● ●
+
+or:
+
+AI confidence
+██████████░ 94%
+
+or:
+
+Intent detected
+Appointment rescheduling
+
+Do this tastefully.
+
+The UI should make the user feel:
+
+"The AI is actively handling calls."
+
+--------------------------------------------------
+9. "NEEDS YOUR ATTENTION" SECTION
+--------------------------------------------------
+
+This section should become one of the strongest parts of the dashboard.
+
+Instead of a large flat block, create clear priority cards.
+
+Example:
+
+NEEDS YOUR ATTENTION
+
+3 items
+
+[URGENT]
+Call redirected
+No staff picked up
+
+Caller •• 7723
+Sent to front desk → voicemail
+
+[Review]
+
+Use clear priority colors.
+
+Suggested:
+
+Critical:
+coral/red
+
+Warning:
+amber
+
+Informational:
+blue
+
+Do not make every item red.
+
+--------------------------------------------------
+10. CALL STATUS SYSTEM
+--------------------------------------------------
+
+Create a consistent status design system.
+
+Statuses:
+
+LIVE
+SUCCESS
+IN PROGRESS
+WAITING
+NEEDS REVIEW
+ESCALATED
+FAILED
+COMPLETED
+TRANSFERRED
+
+Each status should have:
+
+- small colored dot
+- label
+- subtle background
+- readable contrast
+
+Example:
+
+● LIVE
+
+● HIGH CONFIDENCE
+
+● NEEDS REVIEW
+
+Do not use tiny unreadable pills.
+
+--------------------------------------------------
+11. SIDEBAR REDESIGN
+--------------------------------------------------
+
+The sidebar structure is already good.
+
+Keep:
+
+Dashboard
+Live Calls
+Call Log
+Knowledge Base
+Agent Builder
+Simulation & Testing
+Rollout
+Compliance & Audit
+Integrations
+Settings
+
+But visually improve it.
+
+Requirements:
+
+- stronger active state
+- better icon alignment
+- improved spacing
+- clearer grouping
+- subtle hover states
+- notification badges
+- section separators
+- better typography
+
+Active Dashboard should feel clearly selected.
+
+Use an accent indicator on the left.
+
+Example:
+
+│ Dashboard
+│
+
+but make it polished rather than simply adding a bright background.
+
+Group navigation conceptually:
+
+OPERATIONS
+Dashboard
+Live Calls
+Call Log
+
+INTELLIGENCE
+Knowledge Base
+Agent Builder
+Simulation & Testing
+
+DEPLOYMENT
+Rollout
+
+GOVERNANCE
+Compliance & Audit
+Integrations
+Settings
+
+This gives the sidebar more structure.
+
+--------------------------------------------------
+12. TOP NAVIGATION
+--------------------------------------------------
+
+Improve the top navigation.
+
+Current:
+
+Dashboard
+4 live calls
+AICA is answering
+Search
+Theme button
+Organization selector
+
+Keep these concepts.
+
+But make them feel more polished.
+
+For example:
+
+[Dashboard]
+
+● 4 live calls
+
+● AICA is answering
+
+The "AICA is answering" status should look like an actual system state.
+
+Example:
+
+● AICA is answering
+All systems operational
+
+The organization selector should look like a proper workspace switcher.
+
+Search should be more prominent but still compact.
+
+Add keyboard shortcut indicator:
+
+Search calls, documents...
+            ⌘ K
+
+If the application supports keyboard shortcuts, implement this.
+
+--------------------------------------------------
+13. SEARCH
+--------------------------------------------------
+
+Make search feel like a real command center search.
+
+Possible placeholder:
+
+Search calls, patients, documents...
+
+Include:
+
+⌘ K
+
+On focus:
+- larger search panel
+- recent searches
+- calls
+- knowledge documents
+- patients
+- actions
+
+If backend search does not exist, do NOT invent functionality.
+
+Only improve the visual UI around the existing search behavior.
+
+--------------------------------------------------
+14. TYPOGRAPHY
+--------------------------------------------------
+
+Improve typography significantly.
+
+Use a modern professional sans-serif font.
+
+Recommended:
+
+Inter
+
+or
+
+Manrope
+
+or another already-installed project font.
+
+Do NOT introduce unnecessary external dependencies if the project already has a typography system.
+
+Hierarchy:
+
+Page title:
+28–32px
+600–700 weight
+
+Section title:
+18–20px
+600
+
+Card title:
+15–16px
+600
+
+Large metrics:
+36–48px
+600–700
+
+Body:
+14–15px
+
+Metadata:
+12–13px
+
+Avoid excessive bold text.
+
+Use font weight to create hierarchy.
+
+--------------------------------------------------
+15. CARDS
+--------------------------------------------------
+
+Cards should no longer look like flat rectangles.
+
+Use:
+
+- rounded corners around 14–18px
+- subtle border
+- slight elevation
+- differentiated surface colors
+- controlled hover effects
+
+Avoid excessive shadows.
+
+Use a layered surface system.
+
+Example:
+
+background
+    ↓
+surface
+    ↓
+elevated surface
+    ↓
+hover state
+
+Cards should feel like they're sitting above the page.
+
+--------------------------------------------------
+16. GRADIENTS
+--------------------------------------------------
+
+Use gradients sparingly.
+
+Good examples:
+
+very subtle emerald → cyan gradient
+
+for:
+- AI indicators
+- hero areas
+- active call visualizations
+- selected states
+- progress indicators
+
+Do NOT turn every card into a gradient.
+
+The overall UI should remain professional.
+
+--------------------------------------------------
+17. DATA VISUALIZATION
+--------------------------------------------------
+
+The dashboard should provide more insight visually.
+
+Where existing data is available, improve charts.
+
+Use:
+
+- sparklines
+- mini bar charts
+- progress bars
+- radial progress
+- trend indicators
+- timeline indicators
+- call volume visualization
+
+For example:
+
+Calls answered
+
+Mon ▁▃▅▂▃▆
+Tue ▂▅▃▆▇
+Wed ▃▃▆▅▇
+
+Do not add fake data just to make the UI prettier.
+
+If data already exists, visualize it.
+
+If the existing frontend uses mock data, keep the mock data architecture but improve its visualization.
+
+--------------------------------------------------
+18. LIVE CALL CARD DESIGN
+--------------------------------------------------
+
+Make the active call cards more informative.
+
+Example:
+
+┌─────────────────────────────────────┐
+│ ● LIVE                         1:17 │
+│                                     │
+│ Rescheduling                        │
+│ Room 3                              │
+│                                     │
+│ ───── waveform visualization ────   │
+│                                     │
+│ ● High confidence                   │
+│                                     │
+│ Appointment rescheduling            │
+└─────────────────────────────────────┘
+
+Include a small contextual action:
+
+View call →
+
+or
+
+Open transcript →
+
+depending on existing functionality.
+
+--------------------------------------------------
+19. CALL LOG
+--------------------------------------------------
+
+If there is an existing Call Log page, redesign it using the same design system.
+
+It should feel like a professional operational table.
+
+Columns could include:
+
+Time
+Caller
+Intent
+Duration
+AI outcome
+Confidence
+Status
+Action
+
+Use:
+
+- colored status
+- confidence indicators
+- subtle row hover
+- filters
+- date range
+- search
+- pagination if existing
+
+Avoid extremely dense tables.
+
+--------------------------------------------------
+20. LIVE CALL PAGE
+--------------------------------------------------
+
+If a Live Calls page exists, make it one of the strongest pages.
+
+Potential layout:
+
+LEFT:
+active calls
+
+CENTER:
+live transcript
+
+RIGHT:
+AI analysis
+
+Example:
+
+LIVE CALL
+────────────────────
+
+Caller:
+•• 7723
+
+Intent:
+Appointment rescheduling
+
+AI confidence:
+94%
+
+Current state:
+Listening
+
+────────────────────
+
+LIVE TRANSCRIPT
+
+Caller:
+"I need to move my appointment..."
+
+AICA:
+"Of course. I can help..."
+
+────────────────────
+
+AI INSIGHTS
+
+Intent detected
+Appointment rescheduling
+
+Patient verification
+✓ Passed
+
+Knowledge source
+Appointment policy
+
+Recommended action
+Reschedule appointment
+
+This would make the product feel genuinely AI-powered.
+
+--------------------------------------------------
+21. AGENT BUILDER
+--------------------------------------------------
+
+If an Agent Builder page exists, make it visually feel like an AI configuration environment.
+
+Possible sections:
+
+Agent identity
+Voice
+Personality
+Knowledge
+Tools
+Call behavior
+Escalation rules
+Safety
+Testing
+
+Use a clean configuration UI.
+
+Include visual state indicators.
+
+Example:
+
+AICA Front Desk Agent
+
+● Published
+
+Voice
+Professional · Warm
+
+Knowledge
+12 sources
+
+Tools
+5 enabled
+
+Escalation
+3 rules
+
+Do not change the underlying agent functionality.
+
+--------------------------------------------------
+22. KNOWLEDGE BASE
+--------------------------------------------------
+
+Make the Knowledge Base visually appealing.
+
+Show:
+
+Documents
+Sources
+Last updated
+Status
+Usage
+Coverage
+
+Use document cards or a polished table.
+
+Example:
+
+Employee Handbook
+PDF
+Updated 2h ago
+● Indexed
+
+Appointment Policy
+PDF
+Updated yesterday
+● Indexed
+
+Insurance Guide
+DOCX
+Updated 3d ago
+● Needs review
+
+--------------------------------------------------
+23. SIMULATION & TESTING
+--------------------------------------------------
+
+Make this section feel like an AI evaluation environment.
+
+Possible UI:
+
+Test scenario
+
+"Patient wants to reschedule"
+
+Expected intent:
+Appointment change
+
+AI response:
+...
+
+Score:
+94%
+
+Result:
+PASS
+
+Include:
+
+- test cases
+- pass/fail
+- confidence
+- response quality
+- latency
+- escalation behavior
+
+Use visual score indicators.
+
+--------------------------------------------------
+24. ROLLOUT
+--------------------------------------------------
+
+Make rollout feel like deployment management.
+
+Example:
+
+AICA Production
+
+● Healthy
+
+Version:
+v2.4.1
+
+Traffic:
+75%
+
+Calls handled:
+1,284
+
+Error rate:
+0.8%
+
+Rollback available
+
+Use deployment timelines and status indicators.
+
+--------------------------------------------------
+25. COMPLIANCE & AUDIT
+--------------------------------------------------
+
+This is healthcare-related, so this section should visually communicate trust.
+
+Use:
+
+- audit timeline
+- security status
+- access logs
+- policy checks
+- compliance status
+
+Use calm colors and clear indicators.
+
+Do NOT make it look alarming.
+
+Example:
+
+Security status
+● All systems operational
+
+Audit events
+1,284
+
+Policy violations
+0
+
+Pending reviews
+3
+
+--------------------------------------------------
+26. MICRO-INTERACTIONS
+--------------------------------------------------
+
+Add subtle high-quality interactions.
+
+Examples:
+
+- card hover elevation
+- sidebar item hover
+- button hover
+- smooth progress animation
+- live call pulse
+- waveform animation
+- status transitions
+- dropdown animations
+- modal transitions
+- skeleton loading
+
+Keep animation duration around:
+
+150–300ms
+
+Use easing.
+
+Avoid excessive animations.
+
+The interface should feel alive but not distracting.
+
+--------------------------------------------------
+27. RESPONSIVENESS
+--------------------------------------------------
+
+Make sure the design works on:
+
+Desktop
+Laptop
+Tablet
+Mobile
+
+Desktop is the primary target.
+
+Do not allow:
+
+- overflowing cards
+- broken grids
+- horizontal scrolling
+- clipped text
+- sidebar overlap
+- unreadable tables
+
+Use responsive grids.
+
+Example:
+
+Desktop:
+3 KPI cards
+
+Tablet:
+2 + 1
+
+Mobile:
+1 per row
+
+--------------------------------------------------
+28. ACCESSIBILITY
+--------------------------------------------------
+
+Maintain good accessibility.
+
+Requirements:
+
+- WCAG-friendly contrast
+- keyboard navigation
+- visible focus states
+- semantic buttons
+- aria labels where appropriate
+- do not rely solely on color
+- status should include text/icons
+- readable font sizes
+
+Do NOT sacrifice readability for aesthetics.
+
+--------------------------------------------------
+29. ICONS
+--------------------------------------------------
+
+Use the project's existing icon library if one exists.
+
+If using Lucide:
+
+Use Lucide icons consistently.
+
+Avoid mixing random icon styles.
+
+Examples:
+
+Phone
+PhoneCall
+Clock
+BookOpen
+Bot
+Shield
+Settings
+Activity
+AlertTriangle
+CheckCircle
+Users
+Brain
+Zap
+Search
+ChevronDown
+
+Icons should generally be:
+
+16–20px
+
+Do not use oversized icons everywhere.
+
+--------------------------------------------------
+30. EMPTY STATES
+--------------------------------------------------
+
+Improve empty states.
+
+Instead of:
+
+"No calls"
+
+Use:
+
+No active calls
+
+AICA is ready to answer the next call.
+
+[View call history]
+
+Make empty states visually pleasant and useful.
+
+--------------------------------------------------
+31. LOADING STATES
+--------------------------------------------------
+
+Add polished skeleton loaders where appropriate.
+
+Use skeletons that match the shape of the content.
+
+Do NOT use generic full-page spinners unless necessary.
+
+--------------------------------------------------
+32. ERROR STATES
+--------------------------------------------------
+
+Make error states useful.
+
+Example:
+
+Unable to load live calls
+
+We couldn't connect to the call service.
+
+[Retry]
+
+Avoid ugly browser/default error messages.
+
+--------------------------------------------------
+33. DARK MODE
+--------------------------------------------------
+
+The application is primarily dark.
+
+Do NOT simply make everything black.
+
+Use multiple dark surfaces.
+
+The design should have approximately:
+
+5–7 levels of visual depth.
+
+Example:
+
+Level 0:
+#0B1110
+
+Level 1:
+#101917
+
+Level 2:
+#16211D
+
+Level 3:
+#1C2924
+
+Level 4:
+#23332D
+
+Borders:
+#30423A
+
+This is important.
+
+--------------------------------------------------
+34. DO NOT OVERUSE GLOW
+--------------------------------------------------
+
+AI products often make the mistake of using excessive neon glow.
+
+Avoid:
+
+- glowing borders everywhere
+- neon text
+- huge gradients
+- glowing buttons
+- excessive shadows
+
+Use glow only for:
+
+- active AI state
+- live call indicator
+- selected AI elements
+- important real-time activity
+
+--------------------------------------------------
+35. BUTTON DESIGN
+--------------------------------------------------
+
+Primary buttons:
+
+strong accent background
+high contrast text
+
+Secondary:
+
+transparent / elevated surface
+
+Tertiary:
+
+text button
+
+Danger:
+
+red/coral
+
+Examples:
+
+[Review call]
+
+[Open transcript]
+
+[Retry]
+
+[Configure agent]
+
+Buttons should have:
+
+- hover
+- active
+- disabled
+- focus states
+
+--------------------------------------------------
+36. NOTIFICATION / ALERT DESIGN
+--------------------------------------------------
+
+Improve notifications.
+
+Use different visual hierarchy:
+
+SUCCESS
+green
+
+WARNING
+amber
+
+ERROR
+coral
+
+INFO
+blue
+
+Do not use giant colored boxes.
+
+Use subtle tinted backgrounds with strong icon + readable text.
+
+--------------------------------------------------
+37. DASHBOARD LAYOUT
+--------------------------------------------------
+
+Suggested overall layout:
+
+SIDEBAR
+│
+├── Navigation
+│
+└── Workspace
+
+MAIN
+│
+├── Top bar
+│
+├── Page title + system status
+│
+├── KPI row
+│
+├── Live calls
+│
+├── Performance / analytics
+│
+└── Needs attention
+
+Make the page breathe.
+
+Do not pack everything tightly.
+
+Use approximately:
+
+24–32px page padding
+
+16–24px gaps
+
+--------------------------------------------------
+38. ADD A SMALL "SYSTEM HEALTH" AREA
+--------------------------------------------------
+
+If appropriate and if existing data supports it, include a compact system health indicator.
+
+Example:
+
+SYSTEM HEALTH
+
+● Voice service
+● AI model
+● Knowledge base
+● Call routing
+
+All operational
+
+This reinforces that AICA is an infrastructure/product rather than just a dashboard.
+
+If there is no existing backend information for these values, do not fabricate real system health data. Use the existing application state.
+
+--------------------------------------------------
+39. ADD AI INSIGHT CARDS WHERE APPROPRIATE
+--------------------------------------------------
+
+If the data already exists, surface useful AI insights.
+
+Example:
+
+AI INSIGHT
+
+"Rescheduling requests increased 18% this week."
+
+or:
+
+"Insurance questions have the highest escalation rate."
+
+These make the dashboard feel intelligent.
+
+IMPORTANT:
+Do not fabricate analytics and present them as real.
+
+If the current app only has mock data, clearly keep it within the mock-data architecture.
+
+--------------------------------------------------
+40. DESIGN CONSISTENCY
+--------------------------------------------------
+
+Create reusable design tokens.
+
+Centralize:
+
+colors
+spacing
+border radius
+shadows
+typography
+transitions
+status colors
+
+Do not hardcode slightly different shades throughout components.
+
+For example:
+
+--background
+--surface
+--surface-elevated
+--surface-hover
+--border
+--text-primary
+--text-secondary
+--text-muted
+--accent
+--success
+--warning
+--danger
+--info
+
+Use these consistently.
+
+--------------------------------------------------
+41. COMPONENT SYSTEM
+--------------------------------------------------
+
+Where possible, create/reuse components such as:
+
+MetricCard
+StatusBadge
+LiveCallCard
+ConfidenceIndicator
+ProgressRing
+Sparkline
+AttentionCard
+SystemStatus
+SearchBar
+WorkspaceSwitcher
+SectionHeader
+EmptyState
+LoadingSkeleton
+CallStatus
+AIInsightCard
+
+Do not duplicate styling across pages.
+
+--------------------------------------------------
+42. IMPORTANT: PRESERVE FUNCTIONALITY
+--------------------------------------------------
+
+Before making changes:
+
+1. Inspect the existing repository.
+2. Understand the frontend architecture.
+3. Identify the framework.
+4. Identify the styling system.
+5. Identify the component library.
+6. Identify routing.
+7. Identify existing API/data sources.
+8. Identify reusable components.
+9. Identify current pages.
+10. Identify which components are safe to visually modify.
+
+Then implement the redesign.
+
+Do NOT replace working functionality just for visual reasons.
+
+Do NOT remove existing pages.
+
+Do NOT remove existing API integrations.
+
+Do NOT replace working mock data architecture.
+
+Do NOT rewrite business logic unnecessarily.
+
+--------------------------------------------------
+43. IMPORTANT: USE THE EXISTING STACK
+--------------------------------------------------
+
+First inspect package.json and the project structure.
+
+If the project already uses:
+
+Tailwind
+→ use Tailwind
+
+CSS modules
+→ use existing CSS module architecture
+
+shadcn
+→ use existing shadcn components where appropriate
+
+Material UI
+→ use existing MUI components where appropriate
+
+Do not introduce another UI framework unless absolutely necessary.
+
+Avoid unnecessary dependencies.
+
+--------------------------------------------------
+44. VISUAL QUALITY BAR
+--------------------------------------------------
+
+The final result should look like something that could realistically be shown to:
+
+- a hospital administrator
+- a clinic manager
+- an enterprise customer
+- an investor
+- a product demo audience
+
+It should NOT look like:
+
+- a student project
+- a generic dashboard template
+- a basic CRUD application
+
+The UI should communicate:
+
+"AI is actively operating the front desk."
+
+--------------------------------------------------
+45. VERY IMPORTANT: DO NOT ONLY CHANGE COLORS
+--------------------------------------------------
+
+I do NOT want you to simply modify the background colors.
+
+Improve:
+
+- hierarchy
+- spacing
+- typography
+- card composition
+- information density
+- charts
+- status indicators
+- live activity
+- AI visualization
+- sidebar
+- navigation
+- buttons
+- alerts
+- empty states
+- loading states
+- responsiveness
+- micro-interactions
+
+The redesign should feel like a genuinely improved product.
+
+--------------------------------------------------
+46. IMPLEMENTATION PROCESS
+--------------------------------------------------
+
+Follow this process:
+
+STEP 1:
+Inspect the entire frontend structure.
+
+STEP 2:
+Identify the main dashboard and shared components.
+
+STEP 3:
+Understand existing data flow and do not break it.
+
+STEP 4:
+Create a consistent visual design system.
+
+STEP 5:
+Redesign the application shell:
+- sidebar
+- top navigation
+- background
+- typography
+
+STEP 6:
+Redesign dashboard KPI cards.
+
+STEP 7:
+Redesign live call cards.
+
+STEP 8:
+Redesign needs-attention section.
+
+STEP 9:
+Improve existing charts/data visualizations.
+
+STEP 10:
+Apply the design system to other existing pages.
+
+STEP 11:
+Improve responsive behavior.
+
+STEP 12:
+Add subtle micro-interactions.
+
+STEP 13:
+Run the application.
+
+STEP 14:
+Check for console errors.
+
+STEP 15:
+Check all existing routes.
+
+STEP 16:
+Check that buttons and interactions still work.
+
+STEP 17:
+Fix visual inconsistencies.
+
+--------------------------------------------------
+47. ITERATIVE VISUAL REVIEW
+--------------------------------------------------
+
+After implementation, do not stop after the first pass.
+
+Review the resulting UI critically.
+
+Ask:
+
+- Does the dashboard still look too monochromatic?
+- Are cards distinguishable?
+- Is the main metric obvious?
+- Is the active AI state obvious?
+- Can I immediately identify calls that need attention?
+- Does the UI feel like a premium product?
+- Is there enough contrast?
+- Is anything too bright?
+- Are there too many borders?
+- Are there too many colors?
+- Is information easy to scan?
+- Does the interface feel trustworthy for healthcare?
+- Does it visually communicate AI activity?
+
+Then refine it.
+
+--------------------------------------------------
+48. FINAL DESIGN PRINCIPLE
+--------------------------------------------------
+
+The final design should follow this principle:
+
+"High information density + strong visual hierarchy + restrained color + meaningful AI activity."
+
+Do not make it colorful for the sake of being colorful.
+
+Every color should communicate something.
+
+Every visual element should have a purpose.
+
+Every metric should be easy to understand.
+
+The result should feel polished, intentional, and production-ready.
+
+--------------------------------------------------
+49. FINAL INSTRUCTION
+--------------------------------------------------
+
+Start by inspecting the repository and existing frontend.
+
+Do not ask me to manually describe files that you can inspect yourself.
+
+Do not immediately start rewriting everything.
+
+First understand the existing architecture and then implement the redesign incrementally.
+
+After completing the redesign, provide a concise summary of:
+
+1. What you changed
+2. Which components/pages were redesigned
+3. What functionality was preserved
+4. Any new reusable components created
+5. Any dependencies added
+6. Any issues that still need attention
+
+Most importantly:
+
+PRIORITIZE VISUAL QUALITY.
+
+I want a substantial visual improvement over the current screenshot while preserving the existing application functionality.

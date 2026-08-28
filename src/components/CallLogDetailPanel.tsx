@@ -36,7 +36,7 @@ export function CallLogDetailPanel({ entry }: { entry: CallLogEntry }) {
         </label>
         <select
           defaultValue={entry.outcome}
-          className="mt-1.5 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-body focus:outline-none"
+          className="mt-1.5 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-body transition-colors focus:border-pulse/50 focus:outline-none"
         >
           <option value="resolved">Resolved by AICA</option>
           <option value="redirected">Redirected to staff</option>
@@ -85,11 +85,7 @@ export function CallLogDetailPanel({ entry }: { entry: CallLogEntry }) {
       )}
 
       <div className="flex gap-2 border-t border-hairline pt-5">
-        <button
-          type="button"
-          onClick={closeDrawer}
-          className="rounded-lg border border-hairline px-3 py-1.5 text-sm font-medium text-body hover:border-pulse/40 hover:text-pulse"
-        >
+        <button type="button" onClick={closeDrawer} className="btn-secondary">
           Flag for review
         </button>
       </div>

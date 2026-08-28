@@ -4,21 +4,35 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* ---- Brand palette — section 1 of the plan. Fixed, non-flipping. ---- */
-  --color-mist: #f6f8f8;
-  --color-ink-teal: #0f2b2e;
-  --color-pulse: #f2604d;
-  --color-sage: #7fa695;
-  --color-sand: #ede6da;
-  --color-amber: #e4a03a;
+  /* ---- Brand-fixed, non-flipping — the nav rail's "control room" color
+     and its companion light text, same in both themes. ---- */
+  --color-ink-teal: #0e1712;
+  --color-mist: #f4f6f2;
 
-  /* ---- Semantic surfaces — these flip under .dark, see below ---- */
-  --color-canvas: var(--color-mist);
+  /* ---- Semantic surfaces — layered depth, flip under .dark below.
+     Light defaults here read as calm/clinical warmth; dark is where the
+     real depth ladder lives (canvas < surface < elevated < hover). ---- */
+  --color-canvas: #f3efe3;
   --color-surface: #ffffff;
-  --color-surface-warm: var(--color-sand);
-  --color-body: var(--color-ink-teal);
-  --color-muted: #4d6668;
-  --color-hairline: rgb(15 43 46 / 10%);
+  --color-surface-elevated: #f7f2e6;
+  --color-surface-hover: #efe7d5;
+  --color-surface-warm: #e7ddc9;
+  --color-body: #242f29;
+  --color-muted: #6e7568;
+  --color-faint: #97a091;
+  --color-hairline: rgb(36 48 42 / 12%);
+
+  /* ---- Accent system — every color communicates a specific meaning, used
+     nowhere decoratively. Light-mode values are deepened for text contrast
+     on a bright surface; dark-mode values (below) are the lighter, more
+     luminous versions meant to hold on near-black. ---- */
+  --color-pulse: #0d9488; /* brand / AI-active / primary CTA */
+  --color-sage: #16a34a; /* success / resolved / healthy */
+  --color-signal: #0e7490; /* AI + system activity (secondary accent) */
+  --color-amber: #b45309; /* warning / needs review */
+  --color-critical: #dc2626; /* error / urgent / escalation */
+  --color-info: #2563eb; /* neutral informational */
+  --color-insight: #7c3aed; /* AI intelligence / automation */
 
   /* ---- Type — Fraunces (display) / Inter (UI) / IBM Plex Mono (data) ---- */
   --font-display: "Fraunces", ui-serif, Georgia, serif;
@@ -37,18 +51,42 @@
   --text-xl: 1.625rem;
   --text-xl--line-height: 1.3;
   --text-2xl: 2.125rem;
-  --text-2xl--line-height: 1.2;
+  --text-2xl--line-height: 1.15;
   --text-3xl: 3rem;
-  --text-3xl--line-height: 1.1;
+  --text-3xl--line-height: 1.05;
+
+  /* ---- Shadows — redefined below per-theme; dark needs real contrast
+     (default Tailwind black-on-black shadows are invisible near #0B1110),
+     light stays a soft, restrained lift. ---- */
+  --shadow-sm: 0 1px 2px rgb(15 23 20 / 6%);
+  --shadow-md: 0 6px 16px -4px rgb(15 23 20 / 10%), 0 1px 2px rgb(15 23 20 / 6%);
+  --shadow-lg: 0 20px 40px -12px rgb(15 23 20 / 18%);
 }
 
 .dark {
-  --color-canvas: #0b1e20;
-  --color-surface: #12302e;
-  --color-surface-warm: #163634;
-  --color-body: #dde6e4;
-  --color-muted: #93a9a7;
-  --color-hairline: rgb(221 230 228 / 12%);
+  /* Depth ladder — five distinct, deliberately-stepped surfaces. Never the
+     same near-black-green twice. */
+  --color-canvas: #0a0f0d;
+  --color-surface: #131c19;
+  --color-surface-elevated: #1a2521;
+  --color-surface-hover: #22322a;
+  --color-surface-warm: #17251f; /* faint mint cast — "this is AICA speaking" */
+  --color-body: #f2f4ee;
+  --color-muted: #a7b3ac;
+  --color-faint: #6d7b73;
+  --color-hairline: #283730;
+
+  --color-pulse: #34d399;
+  --color-sage: #4ade80;
+  --color-signal: #22d3ee;
+  --color-amber: #fbbf24;
+  --color-critical: #fb7185;
+  --color-info: #60a5fa;
+  --color-insight: #a78bfa;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-md: 0 8px 20px -6px rgb(0 0 0 / 50%), 0 1px 0 rgb(255 255 255 / 3%) inset;
+  --shadow-lg: 0 24px 48px -16px rgb(0 0 0 / 65%);
 }
 
 html {
@@ -70,11 +108,55 @@ body {
 
 ::selection {
   background: var(--color-pulse);
-  color: white;
+  color: var(--color-ink-teal);
 }
 
 /* Visible keyboard focus, always `pulse` per the accessibility spec. */
 :focus-visible {
   outline: 2px solid var(--color-pulse);
   outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-hairline);
+  border-radius: 999px;
+  border: 2px solid var(--color-canvas);
+  background-clip: padding-box;
+}
+
+@layer components {
+  /* ---- Shared button system — centralizes what was previously repeated,
+     slightly differently, across a dozen files. ---- */
+  .btn-primary {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-pulse px-4 py-2 text-sm font-semibold text-ink-teal shadow-sm transition-all duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full border border-hairline bg-surface px-4 py-2 text-sm font-medium text-body transition-colors duration-150 hover:border-pulse/40 hover:text-pulse disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium text-muted transition-colors duration-150 hover:bg-surface-hover hover:text-body disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-danger {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full border border-critical/40 px-4 py-2 text-sm font-semibold text-critical transition-colors duration-150 hover:bg-critical/10 disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  /* ---- Shared surface system — the layered-card look used everywhere. ---- */
+  .card {
+    @apply rounded-2xl border border-hairline bg-surface shadow-sm;
+  }
+  .card-interactive {
+    @apply rounded-2xl border border-hairline bg-surface shadow-sm transition-all duration-150 ease-out hover:-translate-y-0.5 hover:border-pulse/25 hover:shadow-md;
+  }
+
+  .input {
+    @apply rounded-full border border-hairline bg-surface px-4 py-1.5 text-sm text-body placeholder:text-faint transition-colors duration-150 focus:border-pulse/50 focus:outline-none;
+  }
 }

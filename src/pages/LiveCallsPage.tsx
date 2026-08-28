@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { mockLiveCalls } from '../data/mock'
 import { PulseLine } from '../components/PulseLine'
 import { ConfidenceBadge } from '../components/ConfidenceBadge'
+import { AiStateIndicator } from '../components/AiStateIndicator'
 import { CitationChip } from '../components/CitationChip'
 import { CitationSourceCard } from '../components/CitationSourceCard'
 import { EmptyState } from '../components/EmptyState'
@@ -66,22 +67,30 @@ function CallListRow({
         type="button"
         onClick={onSelect}
         aria-current={active ? 'true' : undefined}
-        className={`flex w-full flex-col gap-1.5 rounded-2xl border p-3.5 text-left transition-colors duration-150 ${
+        className={`flex w-full flex-col gap-1.5 rounded-2xl border p-3.5 text-left shadow-sm transition-colors duration-150 ${
           active
             ? 'border-pulse/30 bg-pulse/[0.06]'
-            : 'border-hairline bg-surface hover:bg-canvas'
+            : 'border-hairline bg-surface hover:bg-surface-hover'
         }`}
       >
         <div className="flex items-center justify-between gap-2">
-          <p className="truncate text-sm font-medium text-body">
-            {call.intent}
-          </p>
+          <span className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-pulse">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pulse opacity-60" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-pulse" />
+            </span>
+            Live
+          </span>
           <span className="shrink-0 font-mono text-xs text-muted">
             {formatDuration(elapsed)}
           </span>
         </div>
+        <p className="truncate text-sm font-medium text-body">{call.intent}</p>
         <p className="text-xs text-muted">{call.callerLabel}</p>
-        <ConfidenceBadge level={call.confidence} score={call.confidenceScore} />
+        <div className="flex items-center justify-between gap-2">
+          <ConfidenceBadge level={call.confidence} score={call.confidenceScore} />
+          <AiStateIndicator confidence={call.confidence} />
+        </div>
       </button>
     </li>
   )
@@ -102,7 +111,7 @@ function LiveCallDetail({ call }: { call: LiveCall }) {
   }
 
   return (
-    <div className="rounded-2xl border border-hairline bg-surface p-6">
+    <div className="card p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="font-display text-xl font-normal text-body">
@@ -120,7 +129,7 @@ function LiveCallDetail({ call }: { call: LiveCall }) {
             <button
               type="button"
               onClick={() => setTakenOver(false)}
-              className="rounded-full bg-sage px-3 py-1 text-xs font-semibold text-white"
+              className="rounded-full bg-sage px-3 py-1 text-xs font-semibold text-ink-teal"
             >
               Hand back to AICA
             </button>
@@ -129,7 +138,8 @@ function LiveCallDetail({ call }: { call: LiveCall }) {
           <button
             type="button"
             onClick={() => setTakenOver(true)}
-            className="flex items-center gap-2 rounded-full bg-pulse px-4 py-2 text-sm font-semibold text-white shadow-sm transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md"
+            aria-label="Take over this call — barge in and speak directly to the caller"
+            className="btn-primary !bg-[#dc2626] !text-white !px-4 !py-2.5 hover:!bg-[#c81e1e]"
           >
             <LiveCallsIcon className="h-4 w-4" />
             Take over this call
@@ -137,15 +147,19 @@ function LiveCallDetail({ call }: { call: LiveCall }) {
         )}
       </div>
 
-      <PulseLine
-        mode="live"
-        height={56}
-        className="mt-6 text-pulse"
-        aria-label="Live call waveform"
-      />
+      <div className="mt-6 flex items-center justify-between gap-3">
+        <PulseLine
+          mode="live"
+          height={56}
+          className="flex-1 text-pulse"
+          aria-label="Live call waveform"
+        />
+      </div>
 
-      <div className="mt-6 flex items-center gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <ConfidenceBadge level={call.confidence} score={call.confidenceScore} />
+        <span className="text-faint">·</span>
+        <AiStateIndicator confidence={call.confidence} />
         {takenOver && (
           <span className="text-xs font-medium text-muted">
             AICA has stepped back while you're connected.

@@ -2,16 +2,31 @@ import type { AttentionItem } from '../types'
 import { useUiStore } from '../store/ui'
 import { AlertCircleIcon, AlertTriangleIcon } from './icons'
 
-const SEVERITY_ICON: Record<AttentionItem['severity'], typeof AlertTriangleIcon> = {
-  info: AlertCircleIcon,
-  warning: AlertCircleIcon,
-  critical: AlertTriangleIcon,
-}
-
-const SEVERITY_COLOR: Record<AttentionItem['severity'], string> = {
-  info: 'text-sage',
-  warning: 'text-amber',
-  critical: 'text-pulse',
+const SEVERITY_CONFIG: Record<
+  AttentionItem['severity'],
+  { icon: typeof AlertTriangleIcon; text: string; chipBg: string; border: string; tag: string }
+> = {
+  info: {
+    icon: AlertCircleIcon,
+    text: 'text-info',
+    chipBg: 'bg-info/12',
+    border: 'border-l-info',
+    tag: 'Info',
+  },
+  warning: {
+    icon: AlertCircleIcon,
+    text: 'text-amber',
+    chipBg: 'bg-amber/12',
+    border: 'border-l-amber',
+    tag: 'Warning',
+  },
+  critical: {
+    icon: AlertTriangleIcon,
+    text: 'text-critical',
+    chipBg: 'bg-critical/12',
+    border: 'border-l-critical',
+    tag: 'Urgent',
+  },
 }
 
 /** The trust-building panel — proudly shows "0 items" when clear, and
@@ -22,13 +37,16 @@ export function AttentionList({ items }: { items: AttentionItem[] }) {
 
   if (items.length === 0) {
     return (
-      <div className="flex items-center gap-3 rounded-2xl border border-hairline bg-surface px-5 py-6">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-sage/12 text-sage">
+      <div className="card flex items-center gap-3 px-5 py-6">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sage/12 text-sage">
           <AlertCircleIcon className="h-4 w-4" />
         </span>
-        <p className="text-sm text-muted">
-          Nothing needs review right now — AICA is handling calls on its own.
-        </p>
+        <div>
+          <p className="text-sm font-medium text-body">All clear</p>
+          <p className="text-sm text-muted">
+            Nothing needs review right now — AICA is handling calls on its own.
+          </p>
+        </div>
       </div>
     )
   }
@@ -44,18 +62,10 @@ export function AttentionList({ items }: { items: AttentionItem[] }) {
             or send it back for a fix.
           </p>
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={closeDrawer}
-              className="rounded-lg bg-pulse px-3 py-1.5 text-sm font-semibold text-white transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md"
-            >
+            <button type="button" onClick={closeDrawer} className="btn-primary">
               Mark as reviewed
             </button>
-            <button
-              type="button"
-              onClick={closeDrawer}
-              className="rounded-lg border border-hairline px-3 py-1.5 text-sm font-medium text-muted hover:text-body"
-            >
+            <button type="button" onClick={closeDrawer} className="btn-ghost">
               Dismiss
             </button>
           </div>
@@ -65,30 +75,39 @@ export function AttentionList({ items }: { items: AttentionItem[] }) {
   }
 
   return (
-    <div className="rounded-2xl border border-hairline bg-surface-warm">
-      <ul className="divide-y divide-hairline">
-        {items.map((item) => {
-          const Icon = SEVERITY_ICON[item.severity]
-          return (
-            <li key={item.id} className="flex items-start gap-3 px-5 py-4">
-              <Icon
-                className={`mt-0.5 h-4 w-4 shrink-0 ${SEVERITY_COLOR[item.severity]}`}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-body">{item.title}</p>
-                <p className="mt-0.5 text-sm text-muted">{item.detail}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => review(item)}
-                className="shrink-0 rounded-lg border border-hairline px-2.5 py-1 text-xs font-semibold text-body hover:border-pulse/40 hover:text-pulse"
+    <ul className="flex flex-col gap-2.5">
+      {items.map((item) => {
+        const c = SEVERITY_CONFIG[item.severity]
+        const Icon = c.icon
+        return (
+          <li
+            key={item.id}
+            className={`card flex items-start gap-3.5 border-l-4 ${c.border} px-5 py-4`}
+          >
+            <span
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${c.chipBg} ${c.text}`}
+            >
+              <Icon className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p
+                className={`text-[10.5px] font-semibold uppercase tracking-wider ${c.text}`}
               >
-                Review
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </div>
+                {c.tag}
+              </p>
+              <p className="mt-0.5 text-sm font-medium text-body">{item.title}</p>
+              <p className="mt-0.5 text-sm text-muted">{item.detail}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => review(item)}
+              className="btn-secondary shrink-0 !px-3.5 !py-1.5 text-xs"
+            >
+              Review
+            </button>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
