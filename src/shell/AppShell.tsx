@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
-import { mockAgentStatus, mockLiveCalls } from '../data/mock'
+import { mockLiveCalls } from '../data/mock'
+import { useAgentStore } from '../store/agent'
+import type { CallLogSeed } from '../types'
 import { NavRail } from './NavRail'
 import { TopBar } from './TopBar'
 import { ContextDrawer } from './ContextDrawer'
@@ -7,7 +9,7 @@ import { ContextDrawer } from './ContextDrawer'
 interface AppShellProps {
   title: string
   activeNavId: string
-  onNavSelect: (id: string) => void
+  onNavSelect: (id: string, filter?: CallLogSeed) => void
   children: ReactNode
 }
 
@@ -19,6 +21,8 @@ export function AppShell({
   onNavSelect,
   children,
 }: AppShellProps) {
+  const agentStatus = useAgentStore((s) => s.status)
+
   return (
     <div className="flex h-screen bg-canvas">
       <NavRail activeId={activeNavId} onSelect={onNavSelect} />
@@ -26,7 +30,8 @@ export function AppShell({
         <TopBar
           title={title}
           liveCallCount={mockLiveCalls.length}
-          agentStatus={mockAgentStatus}
+          agentStatus={agentStatus}
+          onNavigate={onNavSelect}
         />
         <main className="flex-1 overflow-y-auto p-6 font-content lg:p-8">{children}</main>
       </div>

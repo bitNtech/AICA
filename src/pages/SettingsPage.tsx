@@ -82,36 +82,38 @@ export function SettingsPage() {
           </button>
         </div>
         <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-hairline text-xs text-muted">
-                <th className="px-4 py-3 font-medium">Name</th>
-                <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">Role</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-hairline">
-              {users.map((u) => (
-                <tr key={u.id} className="hover:bg-surface-hover">
-                  <td className="px-4 py-3 text-body">{u.name}</td>
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
-                    {u.email}
-                  </td>
-                  <td className="px-4 py-3 text-body">{roleName(u.roleId)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => openRoleEditor(u)}
-                      className="text-xs font-medium text-pulse hover:underline"
-                    >
-                      Change role
-                    </button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline text-xs text-muted">
+                  <th className="px-4 py-3 font-medium">Name</th>
+                  <th className="px-4 py-3 font-medium">Email</th>
+                  <th className="px-4 py-3 font-medium">Role</th>
+                  <th className="px-4 py-3" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-hairline">
+                {users.map((u) => (
+                  <tr key={u.id} className="hover:bg-surface-hover">
+                    <td className="px-4 py-3 text-body">{u.name}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
+                      {u.email}
+                    </td>
+                    <td className="px-4 py-3 text-body">{roleName(u.roleId)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => openRoleEditor(u)}
+                        className="text-xs font-medium text-pulse hover:underline"
+                      >
+                        Change role
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

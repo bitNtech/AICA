@@ -76,12 +76,12 @@ export const DataReadinessIcon = (p: IconProps) =>
     </>,
   )
 
-export const ComplianceIcon = (p: IconProps) =>
+export const BudgetIcon = (p: IconProps) =>
   base(
     p,
     <>
-      <path d="M12 3.5 19 6.5v5c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9v-5Z" />
-      <path d="M9.2 12 11.2 14 15 9.8" />
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v10M9.5 9.7c0-1.2 1.1-2 2.5-2s2.5.8 2.5 2c0 2.5-5 1.5-5 4 0 1.2 1.1 2 2.5 2s2.5-.8 2.5-2" />
     </>,
   )
 
@@ -171,5 +171,42 @@ export const LinkIcon = (p: IconProps) =>
       <path d="M9.5 14.5 14.5 9.5" />
       <path d="M11 6.5 12.6 4.9a3.2 3.2 0 0 1 4.5 4.5L15.5 11" />
       <path d="M13 17.5 11.4 19.1a3.2 3.2 0 0 1-4.5-4.5L8.5 13" />
+    </>,
+  )
+
+export const BellIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M6 10.5a6 6 0 0 1 12 0c0 3.4 1 5 1.8 6H4.2c.8-1 1.8-2.6 1.8-6Z" />
+      <path d="M10 19a2.2 2.2 0 0 0 4 0" />
+    </>,
+  )
+
+export const PowerIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <path d="M12 4v7" />
+      <path d="M7.2 6.8a7 7 0 1 0 9.6 0" />
+    </>,
+  )
+
+export const PhoneIcon = (p: IconProps) =>
+  base(
+    p,
+    <path d="M5.7 4.4c.7-.5 1.7-.4 2.2.3l1.5 1.9c.5.6.4 1.4-.1 1.9l-1.1 1c.7 1.7 2 3 3.7 3.7l1-1.1c.5-.5 1.3-.6 1.9-.1l1.9 1.5c.7.5.8 1.5.3 2.2l-.9 1.2c-.7.9-1.9 1.3-3 .9-3.9-1.4-7-4.5-8.4-8.4-.4-1.1 0-2.3.9-3Z" />,
+  )
+
+export const SendIcon = (p: IconProps) =>
+  base(p, <path d="M3.5 11.5 20.5 3l-4.7 17-4.3-6-6-2.5Z" />)
+
+export const MicIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
+      <path d="M12 17.5V21M9 21h6" />
     </>,
   )

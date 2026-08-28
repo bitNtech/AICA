@@ -159,78 +159,80 @@ export function CallLogPage({
         />
       ) : (
         <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-hairline bg-surface-elevated text-xs text-muted">
-                <SortableHeader
-                  label="Time"
-                  active={sortKey === 'timestamp'}
-                  dir={sortDir}
-                  onClick={() => toggleSort('timestamp')}
-                />
-                <th className="px-4 py-3 font-medium">Caller</th>
-                <th className="px-4 py-3 font-medium">Intent</th>
-                <th className="px-4 py-3 font-medium">Outcome</th>
-                <th className="px-4 py-3 font-medium">Confidence</th>
-                <SortableHeader
-                  label="Duration"
-                  active={sortKey === 'durationSec'}
-                  dir={sortDir}
-                  onClick={() => toggleSort('durationSec')}
-                />
-                <th className="px-4 py-3 text-center font-medium">Redirected</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-hairline">
-              {rows.map((entry) => (
-                <tr
-                  key={entry.id}
-                  onClick={() => openDetail(entry)}
-                  className="cursor-pointer hover:bg-surface-hover"
-                >
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
-                    {formatRelativeTime(entry.timestamp)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
-                    {entry.callerLabel}
-                  </td>
-                  <td className="px-4 py-3 text-body">
-                    <span className="flex items-center gap-1.5">
-                      {entry.flaggedForReview && (
-                        <AlertTriangleIcon
-                          className="h-3.5 w-3.5 shrink-0 text-critical"
-                          aria-label="Flagged for review"
-                        />
-                      )}
-                      {entry.intent}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_STYLE[entry.outcome]}`}
-                    >
-                      {entry.outcomeLabel}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <ConfidenceBadge level={entry.confidence} score={entry.confidenceScore} />
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
-                    {formatDuration(entry.durationSec)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-center">
-                      {entry.redirected ? (
-                        <CheckIcon className="h-4 w-4 text-amber" />
-                      ) : (
-                        <CloseIcon className="h-3.5 w-3.5 text-muted/40" />
-                      )}
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-hairline bg-surface-elevated text-xs text-muted">
+                  <SortableHeader
+                    label="Time"
+                    active={sortKey === 'timestamp'}
+                    dir={sortDir}
+                    onClick={() => toggleSort('timestamp')}
+                  />
+                  <th className="px-4 py-3 font-medium">Caller</th>
+                  <th className="px-4 py-3 font-medium">Intent</th>
+                  <th className="px-4 py-3 font-medium">Outcome</th>
+                  <th className="px-4 py-3 font-medium">Confidence</th>
+                  <SortableHeader
+                    label="Duration"
+                    active={sortKey === 'durationSec'}
+                    dir={sortDir}
+                    onClick={() => toggleSort('durationSec')}
+                  />
+                  <th className="px-4 py-3 text-center font-medium">Redirected</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-hairline">
+                {rows.map((entry) => (
+                  <tr
+                    key={entry.id}
+                    onClick={() => openDetail(entry)}
+                    className="cursor-pointer hover:bg-surface-hover"
+                  >
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
+                      {formatRelativeTime(entry.timestamp)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
+                      {entry.callerLabel}
+                    </td>
+                    <td className="px-4 py-3 text-body">
+                      <span className="flex items-center gap-1.5">
+                        {entry.flaggedForReview && (
+                          <AlertTriangleIcon
+                            className="h-3.5 w-3.5 shrink-0 text-critical"
+                            aria-label="Flagged for review"
+                          />
+                        )}
+                        {entry.intent}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_STYLE[entry.outcome]}`}
+                      >
+                        {entry.outcomeLabel}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <ConfidenceBadge level={entry.confidence} score={entry.confidenceScore} />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
+                      {formatDuration(entry.durationSec)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-center">
+                        {entry.redirected ? (
+                          <CheckIcon className="h-4 w-4 text-amber" />
+                        ) : (
+                          <CloseIcon className="h-3.5 w-3.5 text-muted/40" />
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

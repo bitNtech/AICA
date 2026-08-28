@@ -5,7 +5,6 @@ import type {
   AgentStatus,
   AttentionItem,
   AttributeField,
-  AuditLogEntry,
   BehaviorSlider,
   BehaviorToggle,
   CallLogEntry,
@@ -16,8 +15,8 @@ import type {
   KnowledgeDoc,
   LineType,
   LiveCall,
+  LowConfidenceAction,
   NavItem,
-  RedactionExample,
   Role,
   SimulationCall,
   SimulationRun,
@@ -84,13 +83,13 @@ export const mockStats: StatSeries[] = [
     delta: '+14 vs. yesterday',
     trend: 'up',
     series: [
-      { label: 'Wed', value: 96 },
-      { label: 'Thu', value: 104 },
-      { label: 'Fri', value: 112 },
-      { label: 'Sat', value: 74 },
-      { label: 'Sun', value: 62 },
-      { label: 'Mon', value: 108 },
-      { label: 'Today', value: 128 },
+      { label: 'Wed', value: 96, byConfidence: { high: 78, review: 12, low: 6 } },
+      { label: 'Thu', value: 104, byConfidence: { high: 84, review: 13, low: 7 } },
+      { label: 'Fri', value: 112, byConfidence: { high: 91, review: 14, low: 7 } },
+      { label: 'Sat', value: 74, byConfidence: { high: 58, review: 10, low: 6 } },
+      { label: 'Sun', value: 62, byConfidence: { high: 48, review: 9, low: 5 } },
+      { label: 'Mon', value: 108, byConfidence: { high: 87, review: 14, low: 7 } },
+      { label: 'Today', value: 128, byConfidence: { high: 104, review: 16, low: 8 } },
     ],
   },
   {
@@ -171,7 +170,7 @@ export const primaryNav: NavItem[] = [
 ]
 
 export const footerNav: NavItem[] = [
-  { id: 'compliance', label: 'Compliance & Audit', href: '/compliance' },
+  { id: 'budget', label: 'Budget', href: '/budget' },
   { id: 'integrations', label: 'Integrations', href: '/integrations' },
   { id: 'settings', label: 'Settings', href: '/settings' },
 ]
@@ -592,22 +591,99 @@ export const mockImprovementItems: ImprovementItem[] = [
   },
 ]
 
-export const mockAuditLog: AuditLogEntry[] = [
-  { id: 'audit-1', actor: 'Priya N.', action: 'Changed confidence floor', target: 'Insurance question → 75%', timestamp: new Date(Date.now() - 3_600_000).toISOString() },
-  { id: 'audit-2', actor: 'AICA (automated)', action: 'Approved improvement', target: '"143 callers asked about Saturday slots"', timestamp: new Date(Date.now() - 7_200_000).toISOString() },
-  { id: 'audit-3', actor: 'Marcus D.', action: 'Resolved conflict', target: '"Front Desk Hours — Updated" vs "2026 Holiday Hours"', timestamp: new Date(Date.now() - 26_000_000).toISOString() },
-  { id: 'audit-4', actor: 'Priya N.', action: 'Published agent config', target: 'v1.4 → v1.5', timestamp: new Date(Date.now() - 90_000_000).toISOString() },
-  { id: 'audit-5', actor: 'Marcus D.', action: 'Uploaded document', target: 'Prescription Refill Policy', timestamp: new Date(Date.now() - 1_036_800_000).toISOString() },
-]
-
-export const mockRedactionExamples: RedactionExample[] = [
+export const mockLowConfidenceActions: LowConfidenceAction[] = [
   {
-    original: 'This is John Miller, my date of birth is 4/12/1985 and my number is 555-0148.',
-    redacted: 'This is [NAME], my date of birth is [DOB] and my number is [PHONE].',
+    id: 'lca-1',
+    callerLabel: 'Caller •• 7723',
+    intent: 'Insurance eligibility — Blue Cross',
+    confidenceScore: 38,
+    timestamp: new Date(Date.now() - 41_000).toISOString(),
+    aiAction:
+      "Told the caller their plan \"should be covered\" without checking the payer list, then moved on to scheduling.",
+    options: [
+      {
+        id: 'opt-verify',
+        label: 'Verify before answering',
+        response: 'Check the payer list first, then give a precise yes/no with the plan name attached.',
+      },
+      {
+        id: 'opt-redirect',
+        label: 'Redirect instead of guessing',
+        response: 'Skip the guess and connect the caller directly to the front desk for insurance questions.',
+      },
+      {
+        id: 'opt-narrow',
+        label: 'Narrow the question',
+        response: 'Ask which specific plan tier they have so the answer is scoped, not a blanket guess.',
+      },
+    ],
   },
   {
-    original: "My policy number is BC-88213-A and I live at 210 Maple Street.",
-    redacted: 'My policy number is [POLICY_ID] and I live at [ADDRESS].',
+    id: 'lca-2',
+    callerLabel: 'Caller •• 4471',
+    intent: 'Billing — itemized charge dispute',
+    confidenceScore: 44,
+    timestamp: new Date(Date.now() - 5_200_000).toISOString(),
+    aiAction:
+      "Apologized for the charge but couldn't explain the itemized breakdown, then took a voicemail for the billing team.",
+    options: [
+      {
+        id: 'opt-pull-bill',
+        label: 'Pull the itemized bill',
+        response: 'Look up the itemized bill through the billing integration and read out each line before offering a callback.',
+      },
+      {
+        id: 'opt-callback',
+        label: 'Offer an immediate callback',
+        response: 'Skip the explanation attempt and offer a same-day callback from billing up front.',
+      },
+      {
+        id: 'opt-escalate',
+        label: 'Escalate live',
+        response: 'Recognize a billing dispute past three lines of detail and transfer the caller live instead of taking a message.',
+      },
+    ],
+  },
+  {
+    id: 'lca-3',
+    callerLabel: 'Caller •• 1187',
+    intent: 'Prescription refill — controlled substance',
+    confidenceScore: 31,
+    timestamp: new Date(Date.now() - 9_400_000).toISOString(),
+    aiAction:
+      'Confirmed the refill request without flagging that it was a controlled substance, then queued it for the pharmacy team.',
+    options: [
+      {
+        id: 'opt-flag',
+        label: 'Flag for callback',
+        response: 'Detect the controlled-substance flag and require a callback confirmation before queuing the refill.',
+      },
+      {
+        id: 'opt-policy',
+        label: 'State the policy up front',
+        response: 'Tell the caller controlled substances always need a callback, then take the message.',
+      },
+    ],
+  },
+  {
+    id: 'lca-4',
+    callerLabel: 'Caller •• 9902',
+    intent: 'Clinical question — medication dosage',
+    confidenceScore: 22,
+    timestamp: new Date(Date.now() - 11_000_000).toISOString(),
+    aiAction: "Gave a general dosage range from the knowledge base instead of redirecting a clinical question.",
+    options: [
+      {
+        id: 'opt-redirect-clinical',
+        label: 'Redirect immediately',
+        response: "Never answer dosage questions — redirect to the nurse line the moment it's identified as clinical.",
+      },
+      {
+        id: 'opt-acknowledge-transfer',
+        label: 'Acknowledge and transfer',
+        response: "Acknowledge the question, explain AICA can't advise on dosage, and transfer live to the nurse line.",
+      },
+    ],
   },
 ]
 
@@ -640,6 +716,9 @@ export const mockUsers: UserAccount[] = [
   { id: 'user-2', name: 'Marcus D.', email: 'marcus@riversidefamily.example', roleId: 'reviewer' },
   { id: 'user-3', name: 'Aisha K.', email: 'aisha@riversidefamily.example', roleId: 'read-only' },
 ]
+
+/** The signed-in account driving the top bar's profile control. */
+export const mockCurrentUser: UserAccount = mockUsers[0]
 
 export const mockIntegrations: Integration[] = [
   { id: 'telephony', name: 'Twilio Voice', category: 'Telephony', status: 'connected', detail: 'Receiving calls on (555) 013-0148' },

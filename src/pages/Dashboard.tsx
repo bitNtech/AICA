@@ -1,16 +1,11 @@
-import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { StatCard } from '../components/StatCard'
-import type { DonutSegment } from '../components/DonutBreakdown'
-import { AttentionList } from '../components/AttentionList'
+import { DonutChartCard, type DonutSegment } from '../components/DonutChartCard'
 import { CallDetailPanel } from '../components/CallDetailPanel'
-import { CompactCallRow } from '../components/CompactCallRow'
-import {
-  mockStats,
-  mockLiveCalls,
-  mockAttentionItems,
-  mockCallLog,
-  mockSimulationRun,
-} from '../data/mock'
+import { CompactLiveCallsPanel } from '../components/CompactLiveCallsPanel'
+import { AgentShutdownControl } from '../components/AgentShutdownControl'
+import { CheckIcon, DataReadinessIcon } from '../components/icons'
+import { mockStats, mockLiveCalls, mockCallLog, mockSimulationRun } from '../data/mock'
 import { useUiStore } from '../store/ui'
 import type { CallLogSeed, CallOutcome, LiveCall } from '../types'
 
@@ -33,7 +28,6 @@ export function Dashboard({
   onNavigate: (id: string, filter?: CallLogSeed) => void
 }) {
   const openDrawer = useUiStore((s) => s.openDrawer)
-  const [attentionItems, setAttentionItems] = useState(mockAttentionItems)
 
   function openCallDetail(call: LiveCall) {
     openDrawer({
@@ -42,22 +36,6 @@ export function Dashboard({
       body: <CallDetailPanel call={call} />,
     })
   }
-
-  function dismissAttentionItem(id: string) {
-    setAttentionItems((prev) => prev.filter((item) => item.id !== id))
-  }
-
-  const worstSeverity = attentionItems.some((i) => i.severity === 'critical')
-    ? 'critical'
-    : attentionItems.some((i) => i.severity === 'warning')
-      ? 'warning'
-      : 'info'
-  const badgeClass =
-    worstSeverity === 'critical'
-      ? 'bg-critical/15 text-critical'
-      : worstSeverity === 'warning'
-        ? 'bg-amber/15 text-amber'
-        : 'bg-info/15 text-info'
 
   const topIntent = mostFrequentIntent([...mockCallLog, ...mockLiveCalls])
 
@@ -83,72 +61,63 @@ export function Dashboard({
     'resolved-no-redirect': resolvedBreakdown,
     'matched-human': matchedBreakdown,
   }
+  const DONUT_ICON: Record<string, ReactNode> = {
+    'resolved-no-redirect': <CheckIcon className="h-4 w-4" />,
+    'matched-human': <DataReadinessIcon className="h-4 w-4" />,
+  }
   const STAT_TARGET: Record<string, () => void> = {
     'calls-answered': () => onNavigate('call-log'),
     'resolved-no-redirect': () => onNavigate('call-log', { outcome: 'resolved' }),
     'matched-human': () => onNavigate('simulation'),
   }
 
+  const countStat = mockStats.find((s) => s.format === 'count')
+  const percentStats = mockStats.filter((s) => s.format === 'percent')
+
   return (
-    <div className="flex flex-col gap-8">
-      <section>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {mockStats.map((stat) => (
-            <StatCard
-              key={stat.id}
-              stat={stat}
-              breakdown={BREAKDOWNS[stat.id]}
-              onOpen={STAT_TARGET[stat.id]}
-            />
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-body">
-          Needs your attention
-          {attentionItems.length > 0 && (
-            <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${badgeClass}`}>
-              {attentionItems.length}
-            </span>
-          )}
-        </h2>
-        <AttentionList
-          items={attentionItems}
-          onNavigate={onNavigate}
-          onDismiss={dismissAttentionItem}
-        />
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-body">Live calls</h2>
-          {mockLiveCalls.length > 0 && (
-            <span className="flex items-center gap-1.5 rounded-full bg-pulse/10 px-1.5 py-0.5 text-[11px] font-semibold text-pulse">
-              <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pulse opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-pulse" />
-              </span>
-              {mockLiveCalls.length} in progress
-            </span>
-          )}
-        </div>
-        <ul className="card flex flex-col divide-y divide-hairline py-1">
-          {mockLiveCalls.map((call) => (
-            <CompactCallRow key={call.id} call={call} onOpen={openCallDetail} />
-          ))}
-        </ul>
-        {topIntent && (
-          <button
-            type="button"
-            onClick={() => onNavigate('call-log', { search: topIntent })}
-            className="mt-3 text-left text-xs text-faint hover:text-muted"
-          >
-            <span className="font-semibold uppercase tracking-wider text-insight">AI insight</span>
-            {'  ·  '}Most common request this week: {topIntent}
-          </button>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        {countStat && (
+          <div className="w-full shrink-0 sm:w-96">
+            <StatCard stat={countStat} onOpen={STAT_TARGET[countStat.id]} />
+          </div>
         )}
-      </section>
+        <CompactLiveCallsPanel
+          calls={mockLiveCalls}
+          onOpenCall={openCallDetail}
+          onViewAll={() => onNavigate('call-log')}
+        />
+      </div>
+
+      {topIntent && (
+        <button
+          type="button"
+          onClick={() => onNavigate('call-log', { search: topIntent })}
+          className="self-start text-left text-xs text-faint hover:text-muted"
+        >
+          <span className="font-semibold uppercase tracking-wider text-insight">AI insight</span>
+          {'  ·  '}Most common request this week: {topIntent}
+        </button>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {percentStats.map((stat) => (
+          <DonutChartCard
+            key={stat.id}
+            title={stat.label}
+            icon={DONUT_ICON[stat.id]}
+            segments={BREAKDOWNS[stat.id] ?? []}
+            centerLabel={stat.value}
+            value={stat.numericValue}
+            target={stat.target}
+            delta={stat.delta}
+            trend={stat.trend}
+            onOpen={STAT_TARGET[stat.id]}
+          />
+        ))}
+      </div>
+
+      <AgentShutdownControl />
     </div>
   )
 }

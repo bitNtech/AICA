@@ -3,7 +3,9 @@ import {
   ReactFlow,
   Background,
   Controls,
+  MiniMap,
   BackgroundVariant,
+  MarkerType,
   addEdge,
   useEdgesState,
   useNodesState,
@@ -45,7 +47,9 @@ import { AgentNodeEditor } from '../components/AgentNodeEditor'
 import { AgentBranchForm } from '../components/AgentBranchForm'
 import { AttributeForm } from '../components/AttributeForm'
 import { useUiStore } from '../store/ui'
-import { AlertTriangleIcon, CheckIcon, ChevronRightIcon } from '../components/icons'
+import { useAgentConfigStore } from '../store/agentConfig'
+import { AlertTriangleIcon, CheckIcon, ChevronRightIcon, CloseIcon } from '../components/icons'
+import { formatBytes } from '../lib/format'
 import type { AttributeField, BehaviorToggle, GlobalFlow } from '../types'
 
 const ENTRY_NODE_ID = 'greeting'
@@ -76,13 +80,22 @@ function buildInitialFlowNodes(): Node<FlowNodeData>[] {
   }))
 }
 
+const EDGE_MARKER = { type: MarkerType.ArrowClosed, color: 'var(--color-muted)', width: 16, height: 16 }
+const EDGE_STYLE = { stroke: 'var(--color-hairline)', strokeWidth: 1.5 }
+const MINIMAP_COLOR: Record<FlowNodeData['status'], string> = {
+  covered: 'var(--color-sage)',
+  gap: 'var(--color-amber)',
+  'never-say': 'var(--color-critical)',
+}
+
 function buildInitialFlowEdges(): Edge[] {
   return mockFlowEdges.map((e) => ({
     id: e.id,
     source: e.source,
     target: e.target,
     type: 'smoothstep',
-    style: { stroke: 'var(--color-hairline)', strokeWidth: 1.5 },
+    style: EDGE_STYLE,
+    markerEnd: EDGE_MARKER,
   }))
 }
 
@@ -113,22 +126,27 @@ export function AgentBuilderPage({ onNavigate }: { onNavigate: (id: string) => v
 
   return (
     <div className="flex flex-col gap-6">
-      <nav aria-label="Setup stages" className="card overflow-x-auto p-5">
-        <ol className="flex min-w-max items-center">
-          {mockAgentSetupStages.map((s, i) => {
+      <nav aria-label="Setup stages" className="card p-5">
+        <ol className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+          {mockAgentSetupStages.map((s) => {
             const done = s.id < stageId
             const active = s.id === stageId
-            const last = i === mockAgentSetupStages.length - 1
             return (
-              <li key={s.id} className={`flex items-center ${last ? '' : 'flex-1'}`}>
+              <li key={s.id}>
                 <button
                   type="button"
                   onClick={() => setStageId(s.id)}
                   aria-current={active ? 'step' : undefined}
-                  className="group flex shrink-0 items-center gap-2.5 rounded-lg py-1 pr-2 text-left"
+                  className={`group flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors duration-150 ${
+                    active
+                      ? 'border-pulse bg-pulse/10'
+                      : done
+                        ? 'border-sage/25 bg-sage/5 hover:bg-sage/10'
+                        : 'border-hairline bg-surface hover:bg-surface-hover'
+                  }`}
                 >
                   <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150 ${
+                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors duration-150 ${
                       done
                         ? 'bg-sage text-white'
                         : active
@@ -139,21 +157,13 @@ export function AgentBuilderPage({ onNavigate }: { onNavigate: (id: string) => v
                     {done ? <CheckIcon className="h-3.5 w-3.5" /> : s.id}
                   </span>
                   <span
-                    className={`hidden whitespace-nowrap text-sm font-medium sm:inline ${
-                      active ? 'text-body' : done ? 'text-body' : 'text-muted group-hover:text-body'
+                    className={`text-sm font-medium ${
+                      active || done ? 'text-body' : 'text-muted group-hover:text-body'
                     }`}
                   >
                     {s.label}
                   </span>
                 </button>
-                {!last && (
-                  <div
-                    className={`mx-3 h-px min-w-6 flex-1 transition-colors duration-150 ${
-                      done ? 'bg-sage' : 'bg-hairline'
-                    }`}
-                    aria-hidden="true"
-                  />
-                )}
               </li>
             )
           })}
@@ -473,7 +483,8 @@ function Stage3Flow({
         {
           ...connection,
           type: 'smoothstep',
-          style: { stroke: 'var(--color-hairline)', strokeWidth: 1.5 },
+          style: EDGE_STYLE,
+          markerEnd: EDGE_MARKER,
         },
         eds,
       ),
@@ -520,7 +531,8 @@ function Stage3Flow({
                 source: parentId,
                 target: id,
                 type: 'smoothstep',
-                style: { stroke: 'var(--color-hairline)', strokeWidth: 1.5 },
+                style: EDGE_STYLE,
+                markerEnd: EDGE_MARKER,
               },
             ])
             closeDrawer()
@@ -535,7 +547,13 @@ function Stage3Flow({
       <CoverageMeter {...mockCoverage} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm font-medium text-body">Main flow — drafted from your calls</p>
+        <div>
+          <p className="text-sm font-medium text-body">Main flow — drafted from your calls</p>
+          <p className="mt-0.5 text-xs text-muted">
+            This is what AICA follows on a live call once published — try changes with Simulate
+            first.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-3 text-xs text-muted">
             <LegendDot className="bg-sage" label="Covered" />
@@ -560,7 +578,7 @@ function Stage3Flow({
         </div>
       </div>
 
-      <div className="h-[480px] overflow-hidden rounded-2xl border border-hairline bg-surface shadow-sm">
+      <div className="h-[540px] overflow-hidden rounded-2xl border border-hairline bg-surface shadow-sm">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -579,9 +597,17 @@ function Stage3Flow({
           fitViewOptions={{ padding: 0.2 }}
           proOptions={{ hideAttribution: true }}
           colorMode="light"
+          defaultEdgeOptions={{ style: EDGE_STYLE, markerEnd: EDGE_MARKER }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-hairline)" />
           <Controls showInteractive={false} />
+          <MiniMap
+            nodeColor={(n) => MINIMAP_COLOR[(n.data as FlowNodeData).status]}
+            maskColor="rgb(243 239 227 / 70%)"
+            className="!border !border-hairline !bg-canvas"
+            pannable
+            zoomable
+          />
           <FitOnCountChange count={nodes.length} />
         </ReactFlow>
       </div>
@@ -692,44 +718,46 @@ function Stage4Attributes() {
       </div>
 
       <div className="card overflow-hidden">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-hairline bg-surface-elevated text-xs text-muted">
-              <th className="px-4 py-3 font-medium">Attribute</th>
-              <th className="px-4 py-3 font-medium">Type</th>
-              <th className="px-4 py-3 font-medium">Live validation</th>
-              <th className="px-4 py-3 text-center font-medium">Required</th>
-              <th className="px-4 py-3 font-medium">Captured at</th>
-              <th className="px-4 py-3 font-medium">Maps to</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-hairline">
-            {fields.map((f, i) => (
-              <tr
-                key={f.name}
-                onClick={() => openEditor(f, i)}
-                className="cursor-pointer hover:bg-surface-hover"
-              >
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-body">
-                  {f.name}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-muted">{f.type}</td>
-                <td className="px-4 py-3 text-muted">{f.validation}</td>
-                <td className="px-4 py-3 text-center">
-                  {f.required ? (
-                    <CheckIcon className="mx-auto h-4 w-4 text-sage" />
-                  ) : (
-                    <span className="text-faint">—</span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-4 py-3 text-muted">{f.capturedAt}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
-                  {f.mapsTo}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-hairline bg-surface-elevated text-xs text-muted">
+                <th className="px-4 py-3 font-medium">Attribute</th>
+                <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Live validation</th>
+                <th className="px-4 py-3 text-center font-medium">Required</th>
+                <th className="px-4 py-3 font-medium">Captured at</th>
+                <th className="px-4 py-3 font-medium">Maps to</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-hairline">
+              {fields.map((f, i) => (
+                <tr
+                  key={f.name}
+                  onClick={() => openEditor(f, i)}
+                  className="cursor-pointer hover:bg-surface-hover"
+                >
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-body">
+                    {f.name}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-muted">{f.type}</td>
+                  <td className="px-4 py-3 text-muted">{f.validation}</td>
+                  <td className="px-4 py-3 text-center">
+                    {f.required ? (
+                      <CheckIcon className="mx-auto h-4 w-4 text-sage" />
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-muted">{f.capturedAt}</td>
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
+                    {f.mapsTo}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {unmapped.length > 0 && (
@@ -842,6 +870,90 @@ function Stage6Context({ onNavigate }: { onNavigate: (id: string) => void }) {
           </button>
         </div>
       )}
+
+      <AdditionalContextPanel />
+    </div>
+  )
+}
+
+function AdditionalContextPanel() {
+  const docs = useAgentConfigStore((s) => s.additionalContext)
+  const addDocs = useAgentConfigStore((s) => s.addAdditionalContext)
+  const removeDoc = useAgentConfigStore((s) => s.removeAdditionalContext)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function handleFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return
+    addDocs(
+      Array.from(fileList).map((f) => ({
+        id: `ctx-${Date.now()}-${f.name}`,
+        name: f.name,
+        sizeLabel: formatBytes(f.size),
+      })),
+    )
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-body">Additional context for this agent</p>
+          <p className="mt-1 text-xs text-muted">
+            Scoped to this configuration only — kept separate from the shared Knowledge Base
+            library. Used automatically in Simulation &amp; Testing while you iterate, and
+            bundled into this version when you publish.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="btn-secondary shrink-0 !px-3.5 !py-1.5 text-xs"
+        >
+          + Upload files
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            handleFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      </div>
+
+      {docs.length === 0 ? (
+        <p className="mt-4 rounded-xl border border-dashed border-hairline bg-canvas px-4 py-6 text-center text-xs text-muted">
+          No additional documents yet — upload a one-off file (a draft script, a pricing sheet)
+          to test with, without adding it to the shared library.
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-hairline">
+          {docs.map((doc) => (
+            <li key={doc.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <div className="min-w-0">
+                <p className="truncate text-body">{doc.name}</p>
+                <p className="text-xs text-muted">{doc.sizeLabel}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="rounded-full bg-sage/12 px-2 py-0.5 text-[11px] font-medium text-sage">
+                  Attached
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeDoc(doc.id)}
+                  aria-label={`Remove ${doc.name}`}
+                  title="Remove"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-faint transition-colors hover:bg-surface-hover hover:text-body"
+                >
+                  <CloseIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -854,13 +966,21 @@ function Stage7Review({
   publishedVersion: string | null
 }) {
   const hasConflict = mockDocConflicts.length > 0
+  const additionalContext = useAgentConfigStore((s) => s.additionalContext)
+  const changes =
+    additionalContext.length > 0
+      ? [
+          ...mockSetupChanges,
+          `+ context  ${additionalContext.length} additional document${additionalContext.length === 1 ? '' : 's'} attached`,
+        ]
+      : mockSetupChanges
 
   return (
     <div className="flex flex-col gap-4">
       <div className="card p-5">
         <p className="text-sm font-medium text-body">Changes in this version</p>
         <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
-          {mockSetupChanges.map((c) => (
+          {changes.map((c) => (
             <li
               key={c}
               className={

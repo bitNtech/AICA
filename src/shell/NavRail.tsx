@@ -8,7 +8,7 @@ import {
   CallLogIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
-  ComplianceIcon,
+  BudgetIcon,
   DashboardIcon,
   HelpIcon,
   ImprovementFeedIcon,
@@ -25,7 +25,7 @@ const ICONS: Record<string, (props: { className?: string }) => ReactElement> = {
   'agent-builder': AgentBuilderIcon,
   simulation: SimulationIcon,
   'improvement-feed': ImprovementFeedIcon,
-  compliance: ComplianceIcon,
+  budget: BudgetIcon,
   integrations: IntegrationsIcon,
   settings: SettingsIcon,
   help: HelpIcon,
@@ -63,12 +63,21 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
           expanded ? 'gap-2.5' : 'lg:flex-col lg:justify-center lg:gap-1.5'
         }`}
       >
-        <img src={aicaMark} alt="" className="h-7 w-7 shrink-0" aria-hidden="true" />
-        {expanded && (
-          <span className="hidden truncate font-display text-lg font-normal tracking-tight text-mist lg:inline">
-            AICA
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={() => onSelect('dashboard')}
+          aria-label="Go to dashboard"
+          className={`flex shrink-0 items-center rounded-md transition-opacity hover:opacity-80 ${
+            expanded ? 'gap-2.5' : 'lg:flex-col lg:gap-1.5'
+          }`}
+        >
+          <img src={aicaMark} alt="" className="h-7 w-7 shrink-0" aria-hidden="true" />
+          {expanded && (
+            <span className="hidden truncate font-display text-lg font-normal tracking-tight text-mist lg:inline">
+              AICA
+            </span>
+          )}
+        </button>
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}

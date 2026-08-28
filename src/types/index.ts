@@ -44,8 +44,14 @@ export interface StatSeries {
   format: 'count' | 'percent'
   delta?: string
   trend: 'up' | 'down' | 'flat'
-  /** Recent history for the count format's bar chart — last entry is "today". */
-  series: { label: string; value: number }[]
+  /** Recent history for the count format's bar chart — last entry is "today".
+   * `byConfidence` splits that day's total into the three confidence tiers
+   * (they sum to `value`), so the bar itself shows the mix, not just volume. */
+  series: {
+    label: string
+    value: number
+    byConfidence: { high: number; review: number; low: number }
+  }[]
   /** `percent` format only — the practice's own benchmark for this metric. */
   target?: number
 }
@@ -156,6 +162,15 @@ export interface GlobalFlow {
   enabled: boolean
 }
 
+/** A one-off document attached to a single agent config — separate from the
+ * shared Knowledge Base library, used while iterating in Simulation &
+ * Testing and bundled into the version at publish time. */
+export interface AdditionalContextDoc {
+  id: string
+  name: string
+  sizeLabel: string
+}
+
 export type FlowNodeStatus = 'covered' | 'gap' | 'never-say'
 
 export interface AgentFlowNode {
@@ -209,17 +224,24 @@ export interface ImprovementItem {
   status: ImprovementStatus
 }
 
-export interface AuditLogEntry {
+export interface LowConfidenceOption {
   id: string
-  actor: string
-  action: string
-  target: string
-  timestamp: string
+  label: string
+  response: string
 }
 
-export interface RedactionExample {
-  original: string
-  redacted: string
+/** One call AICA handled under confidence threshold — what it actually did,
+ * plus candidate responses an admin picks (or rewrites) as the optimal one.
+ * Reviewed picks batch into the next weekly fine-tuning run. */
+export interface LowConfidenceAction {
+  id: string
+  callerLabel: string
+  intent: string
+  confidenceScore: number
+  timestamp: string
+  aiAction: string
+  options: LowConfidenceOption[]
+  resolution?: { optionId: string; customText?: string }
 }
 
 export interface Role {

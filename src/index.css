@@ -138,4 +138,85 @@ body {
   .input {
     @apply rounded-full border border-hairline bg-surface px-4 py-1.5 text-sm text-body placeholder:text-faint transition-colors duration-150 focus:border-pulse/50 focus:outline-none;
   }
+
+  /* ---- Boot splash — the one place a grand, one-time entrance animation is
+     allowed (see motion principles: page transitions are otherwise instant).
+     Named classes instead of Tailwind arbitrary `animation:` values so the
+     multi-animation shorthand and cubic-bezier commas stay unambiguous. ---- */
+  .aica-splash-mark {
+    animation:
+      aica-wipe 1400ms cubic-bezier(0.22, 1, 0.36, 1) forwards,
+      aica-beat 380ms ease-out 1400ms 1 forwards,
+      aica-glow 2000ms ease-in-out 1400ms 1 forwards;
+  }
+  .aica-splash-ring-1 {
+    animation: aica-ring 1800ms cubic-bezier(0.22, 1, 0.36, 1) 1400ms 1 forwards;
+  }
+  .aica-splash-ring-2 {
+    animation: aica-ring 1800ms cubic-bezier(0.22, 1, 0.36, 1) 1700ms 1 forwards;
+  }
+  .aica-splash-ring-3 {
+    animation: aica-ring 1800ms cubic-bezier(0.22, 1, 0.36, 1) 2000ms 1 forwards;
+  }
+  .aica-splash-letter {
+    animation: aica-fade-up 600ms ease-out forwards;
+  }
+  .aica-splash-fade {
+    animation: aica-fade 700ms ease-out forwards;
+  }
+}
+
+@keyframes aica-wipe {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes aica-beat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+@keyframes aica-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 rgba(118, 147, 130, 0));
+  }
+  50% {
+    filter: drop-shadow(0 0 26px rgba(118, 147, 130, 0.65));
+  }
+}
+@keyframes aica-ring {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+@keyframes aica-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes aica-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }

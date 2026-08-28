@@ -1,22 +1,30 @@
 import { useState } from 'react'
 import { AppShell } from './shell/AppShell'
 import { EmptyState } from './components/EmptyState'
+import { LoadingScreen } from './components/LoadingScreen'
 import { Dashboard } from './pages/Dashboard'
 import { CallLogPage } from './pages/CallLogPage'
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage'
 import { AgentBuilderPage } from './pages/AgentBuilderPage'
 import { SimulationPage } from './pages/SimulationPage'
 import { ImprovementFeedPage } from './pages/ImprovementFeedPage'
-import { CompliancePage } from './pages/CompliancePage'
+import { BudgetPage } from './pages/BudgetPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { HelpContactPage } from './pages/HelpContactPage'
 import { footerNav, primaryNav, supportNav } from './data/mock'
 import type { CallLogSeed } from './types'
 
+const SPLASH_SEEN_KEY = 'aica-splash-seen'
+
 function App() {
   const [activeNavId, setActiveNavId] = useState('dashboard')
   const [callLogSeed, setCallLogSeed] = useState<CallLogSeed | undefined>()
+  // Boot splash, once per tab — never on in-app navigation, which never
+  // reloads this component anyway. sessionStorage clears the flag on close.
+  const [showSplash, setShowSplash] = useState(
+    () => sessionStorage.getItem(SPLASH_SEEN_KEY) !== '1',
+  )
   const activeLabel =
     [...primaryNav, ...footerNav, ...supportNav].find((n) => n.id === activeNavId)
       ?.label ?? 'Dashboard'
@@ -30,19 +38,29 @@ function App() {
   }
 
   return (
-    <AppShell
-      title={activeLabel}
-      activeNavId={activeNavId}
-      onNavSelect={navigate}
-    >
-      <Page
-        id={activeNavId}
-        label={activeLabel}
-        onBack={() => navigate('dashboard')}
-        onNavigate={navigate}
-        callLogSeed={callLogSeed}
-      />
-    </AppShell>
+    <>
+      {showSplash && (
+        <LoadingScreen
+          onDone={() => {
+            sessionStorage.setItem(SPLASH_SEEN_KEY, '1')
+            setShowSplash(false)
+          }}
+        />
+      )}
+      <AppShell
+        title={activeLabel}
+        activeNavId={activeNavId}
+        onNavSelect={navigate}
+      >
+        <Page
+          id={activeNavId}
+          label={activeLabel}
+          onBack={() => navigate('dashboard')}
+          onNavigate={navigate}
+          callLogSeed={callLogSeed}
+        />
+      </AppShell>
+    </>
   )
 }
 
@@ -78,8 +96,8 @@ function Page({
       return <SimulationPage />
     case 'improvement-feed':
       return <ImprovementFeedPage />
-    case 'compliance':
-      return <CompliancePage onNavigate={onNavigate} />
+    case 'budget':
+      return <BudgetPage />
     case 'integrations':
       return <IntegrationsPage />
     case 'settings':

@@ -1,14 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentStatus, UsageMetric } from '../types'
-import { mockOrg, mockUsage } from '../data/mock'
-import { ChevronDownIcon, SearchIcon } from '../components/icons'
+import type { AgentStatus, CallLogSeed } from '../types'
+import { mockAttentionItems, mockCurrentUser, mockRoles } from '../data/mock'
+import { AttentionList } from '../components/AttentionList'
+import { BellIcon, SearchIcon } from '../components/icons'
+
+function initials(name: string): string {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
+}
 
 const STATUS_CONFIG: Record<
   AgentStatus,
   { label: string; sub: string; dot: string }
 > = {
   answering: { label: 'AICA is answering', sub: 'All systems operational', dot: 'bg-sage' },
-  paused: { label: 'AICA is paused', sub: 'No calls are being answered', dot: 'bg-amber' },
+  paused: { label: 'AICA is paused', sub: 'Manual workforce is handling calls', dot: 'bg-amber' },
   degraded: { label: 'Degraded', sub: 'Check integrations', dot: 'bg-critical' },
 }
 
@@ -16,9 +27,10 @@ interface TopBarProps {
   title: string
   liveCallCount: number
   agentStatus: AgentStatus
+  onNavigate: (id: string, filter?: CallLogSeed) => void
 }
 
-export function TopBar({ title, liveCallCount, agentStatus }: TopBarProps) {
+export function TopBar({ title, liveCallCount, agentStatus, onNavigate }: TopBarProps) {
   const status = STATUS_CONFIG[agentStatus]
 
   return (
@@ -47,20 +59,39 @@ export function TopBar({ title, liveCallCount, agentStatus }: TopBarProps) {
           <input
             type="search"
             placeholder="Search calls, patients, documents…"
-            className="w-52 rounded-full border border-hairline bg-canvas py-1.5 pl-9 pr-12 text-sm text-body placeholder:text-faint transition-[width,border-color] duration-150 focus:w-72 focus:border-pulse/50 focus:outline-none lg:w-64 lg:focus:w-80"
+            className="w-52 rounded-full border border-hairline bg-canvas py-1.5 pl-9 pr-4 text-sm text-body placeholder:text-faint transition-[width,border-color] duration-150 focus:w-72 focus:border-pulse/50 focus:outline-none lg:w-64 lg:focus:w-80"
           />
-          <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded border border-hairline bg-surface px-1.5 py-0.5 font-mono text-[10px] text-faint md:inline-flex">
-            ⌘K
-          </kbd>
         </label>
-        <OrgMenu />
+        <NotificationMenu onNavigate={onNavigate} />
+        <UserMenu onNavigate={onNavigate} />
       </div>
     </header>
   )
 }
 
-function OrgMenu() {
+function UserMenu({ onNavigate }: { onNavigate: (id: string, filter?: CallLogSeed) => void }) {
+  const role = mockRoles.find((r) => r.id === mockCurrentUser.roleId)
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate('settings')}
+      title={`${mockCurrentUser.name} · ${role?.name ?? ''} — open Settings`}
+      className="flex shrink-0 items-center gap-2 rounded-full border border-hairline py-1 pl-1 pr-2.5 transition-colors hover:border-pulse/30 hover:bg-surface-hover"
+    >
+      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink-teal text-[11px] font-semibold text-mist">
+        {initials(mockCurrentUser.name)}
+      </span>
+      <span className="hidden max-w-[140px] truncate text-sm font-medium text-body sm:inline">
+        {mockCurrentUser.name}
+      </span>
+    </button>
+  )
+}
+
+function NotificationMenu({ onNavigate }: { onNavigate: (id: string, filter?: CallLogSeed) => void }) {
   const [open, setOpen] = useState(false)
+  const [attentionItems, setAttentionItems] = useState(mockAttentionItems)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -72,71 +103,75 @@ function OrgMenu() {
     return () => document.removeEventListener('mousedown', onClick)
   }, [open])
 
+  function dismissAttentionItem(id: string) {
+    setAttentionItems((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  function navigateAndClose(id: string, filter?: CallLogSeed) {
+    onNavigate(id, filter)
+    setOpen(false)
+  }
+
+  const worstSeverity = attentionItems.some((i) => i.severity === 'critical')
+    ? 'critical'
+    : attentionItems.some((i) => i.severity === 'warning')
+      ? 'warning'
+      : 'info'
+  const badgeClass =
+    worstSeverity === 'critical'
+      ? 'bg-critical text-ink-teal'
+      : worstSeverity === 'warning'
+        ? 'bg-amber text-ink-teal'
+        : 'bg-info text-ink-teal'
+
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-full border border-hairline py-1 pl-1 pr-2.5 transition-colors hover:border-pulse/30 hover:bg-surface-hover"
+        aria-label="Notifications"
+        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-hairline text-body transition-colors hover:border-pulse/30 hover:bg-surface-hover"
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink-teal text-[11px] font-semibold text-mist">
-          {mockOrg.initials}
-        </span>
-        <span className="hidden max-w-[140px] truncate text-sm font-medium text-body sm:inline">
-          {mockOrg.name}
-        </span>
-        <ChevronDownIcon className="h-3.5 w-3.5 text-faint" />
+        <BellIcon className="h-4.5 w-4.5" />
+        {attentionItems.length > 0 && (
+          <span
+            className={`absolute -right-1 -top-1 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none ${badgeClass}`}
+          >
+            {attentionItems.length}
+          </span>
+        )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-64 rounded-2xl border border-hairline bg-surface-elevated py-1.5 shadow-lg">
-          <div className="flex items-center gap-2.5 px-3 py-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-teal text-xs font-semibold text-mist">
-              {mockOrg.initials}
-            </span>
-            <div className="min-w-0">
-              <p className="text-[10.5px] font-semibold uppercase tracking-wider text-faint">
-                {mockOrg.plan}
-              </p>
-              <p className="truncate text-sm font-medium text-body">{mockOrg.name}</p>
+        <div className="absolute right-0 top-full z-30 mt-2 w-96 overflow-hidden rounded-2xl border border-hairline bg-surface-elevated shadow-lg">
+          <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-body">Notifications</p>
+              {attentionItems.length > 0 && (
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass}`}>
+                  {attentionItems.length}
+                </span>
+              )}
             </div>
+            {attentionItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setAttentionItems([])}
+                className="text-xs font-medium text-pulse hover:underline"
+              >
+                Clear all
+              </button>
+            )}
           </div>
-          <div className="mx-1.5 mb-1 border-t border-hairline" />
-          <div className="px-3 pb-2 pt-1.5">
-            <p className="pb-2 text-[10.5px] font-semibold uppercase tracking-wider text-faint">
-              Usage this month
-            </p>
-            <div className="flex flex-col gap-3">
-              {mockUsage.map((metric) => (
-                <UsageRow key={metric.id} metric={metric} />
-              ))}
-            </div>
+          <div className="max-h-96 overflow-y-auto p-3">
+            <AttentionList
+              items={attentionItems}
+              onNavigate={navigateAndClose}
+              onDismiss={dismissAttentionItem}
+            />
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function UsageRow({ metric }: { metric: UsageMetric }) {
-  const percent = Math.min(100, Math.round((metric.used / metric.limit) * 100))
-  const near = percent >= 90
-
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2 text-sm">
-        <span className="text-body">{metric.label}</span>
-        <span className="font-medium text-body">{metric.value}</span>
-      </div>
-      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-canvas">
-        <div
-          className={`h-full rounded-full ${near ? 'bg-critical' : 'bg-pulse'}`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-      <p className="mt-1 text-xs text-faint">
-        {percent}% of {metric.limit.toLocaleString()} {metric.unit} included
-      </p>
     </div>
   )
 }
