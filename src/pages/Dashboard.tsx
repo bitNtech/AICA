@@ -1,9 +1,9 @@
+import { useState } from 'react'
 import { StatCard } from '../components/StatCard'
 import type { DonutSegment } from '../components/DonutBreakdown'
 import { AttentionList } from '../components/AttentionList'
 import { CallDetailPanel } from '../components/CallDetailPanel'
 import { CompactCallRow } from '../components/CompactCallRow'
-import { ChevronRightIcon } from '../components/icons'
 import {
   mockStats,
   mockLiveCalls,
@@ -33,6 +33,7 @@ export function Dashboard({
   onNavigate: (id: string, filter?: CallLogSeed) => void
 }) {
   const openDrawer = useUiStore((s) => s.openDrawer)
+  const [attentionItems, setAttentionItems] = useState(mockAttentionItems)
 
   function openCallDetail(call: LiveCall) {
     openDrawer({
@@ -42,9 +43,13 @@ export function Dashboard({
     })
   }
 
-  const worstSeverity = mockAttentionItems.some((i) => i.severity === 'critical')
+  function dismissAttentionItem(id: string) {
+    setAttentionItems((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  const worstSeverity = attentionItems.some((i) => i.severity === 'critical')
     ? 'critical'
-    : mockAttentionItems.some((i) => i.severity === 'warning')
+    : attentionItems.some((i) => i.severity === 'warning')
       ? 'warning'
       : 'info'
   const badgeClass =
@@ -102,33 +107,31 @@ export function Dashboard({
       <section>
         <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-body">
           Needs your attention
-          {mockAttentionItems.length > 0 && (
+          {attentionItems.length > 0 && (
             <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${badgeClass}`}>
-              {mockAttentionItems.length}
+              {attentionItems.length}
             </span>
           )}
         </h2>
-        <AttentionList items={mockAttentionItems} onNavigate={onNavigate} />
+        <AttentionList
+          items={attentionItems}
+          onNavigate={onNavigate}
+          onDismiss={dismissAttentionItem}
+        />
       </section>
 
       <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-body">
-            Live calls
-            {mockLiveCalls.length > 0 && (
-              <span className="rounded-full bg-pulse/10 px-1.5 py-0.5 text-[11px] font-semibold text-pulse">
-                {mockLiveCalls.length}
+        <div className="mb-2 flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-body">Live calls</h2>
+          {mockLiveCalls.length > 0 && (
+            <span className="flex items-center gap-1.5 rounded-full bg-pulse/10 px-1.5 py-0.5 text-[11px] font-semibold text-pulse">
+              <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pulse opacity-60" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-pulse" />
               </span>
-            )}
-          </h2>
-          <button
-            type="button"
-            onClick={() => onNavigate('live-calls')}
-            className="flex items-center gap-0.5 text-xs font-medium text-muted transition-colors hover:text-pulse"
-          >
-            View all
-            <ChevronRightIcon className="h-3.5 w-3.5" />
-          </button>
+              {mockLiveCalls.length} in progress
+            </span>
+          )}
         </div>
         <ul className="card flex flex-col divide-y divide-hairline py-1">
           {mockLiveCalls.map((call) => (

@@ -3,8 +3,9 @@ import { mockCallLog } from '../data/mock'
 import { ConfidenceBadge } from '../components/ConfidenceBadge'
 import { CallLogDetailPanel } from '../components/CallLogDetailPanel'
 import { EmptyState } from '../components/EmptyState'
-import { CheckIcon, CloseIcon } from '../components/icons'
+import { AlertTriangleIcon, CheckIcon, CloseIcon } from '../components/icons'
 import { formatDuration, formatRelativeTime } from '../lib/format'
+import { downloadCsv } from '../lib/exportCsv'
 import { useUiStore } from '../store/ui'
 import type { CallLogEntry, CallOutcome, ConfidenceLevel } from '../types'
 
@@ -27,6 +28,7 @@ export function CallLogPage({
   initialConfidenceFilter?: 'all' | ConfidenceLevel
 }) {
   const openDrawer = useUiStore((s) => s.openDrawer)
+  const [entries, setEntries] = useState<CallLogEntry[]>(mockCallLog)
   const [search, setSearch] = useState(initialSearch)
   const [outcomeFilter, setOutcomeFilter] = useState<'all' | CallOutcome>(initialOutcomeFilter)
   const [confidenceFilter, setConfidenceFilter] = useState<'all' | ConfidenceLevel>(
@@ -37,7 +39,7 @@ export function CallLogPage({
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const filtered = mockCallLog.filter((entry) => {
+    const filtered = entries.filter((entry) => {
       if (outcomeFilter !== 'all' && entry.outcome !== outcomeFilter) return false
       if (confidenceFilter !== 'all' && entry.confidence !== confidenceFilter) return false
       if (q && !`${entry.intent} ${entry.callerLabel}`.toLowerCase().includes(q))
@@ -50,7 +52,7 @@ export function CallLogPage({
       return sortDir === 'asc' ? av - bv : bv - av
     })
     return sorted
-  }, [search, outcomeFilter, confidenceFilter, sortKey, sortDir])
+  }, [entries, search, outcomeFilter, confidenceFilter, sortKey, sortDir])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -61,11 +63,38 @@ export function CallLogPage({
     }
   }
 
+  function updateEntry(id: string, patch: Partial<CallLogEntry>) {
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)))
+  }
+
+  function exportRows() {
+    downloadCsv(
+      `call-log-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['Time', 'Caller', 'Intent', 'Outcome', 'Confidence', 'Confidence %', 'Duration (s)', 'Redirected', 'Flagged'],
+      rows.map((e) => [
+        e.timestamp,
+        e.callerLabel,
+        e.intent,
+        e.outcomeLabel,
+        e.confidence,
+        e.confidenceScore,
+        e.durationSec,
+        e.redirected ? 'yes' : 'no',
+        e.flaggedForReview ? 'yes' : 'no',
+      ]),
+    )
+  }
+
   function openDetail(entry: CallLogEntry) {
     openDrawer({
       title: entry.intent,
       subtitle: `${entry.callerLabel} · ${formatRelativeTime(entry.timestamp)}`,
-      body: <CallLogDetailPanel entry={entry} />,
+      body: (
+        <CallLogDetailPanel
+          entry={entry}
+          onUpdate={(patch) => updateEntry(entry.id, patch)}
+        />
+      ),
     })
   }
 
@@ -102,9 +131,19 @@ export function CallLogPage({
           ]}
         />
         </div>
-        <p className="font-mono text-xs text-faint">
-          {rows.length} {rows.length === 1 ? 'call' : 'calls'}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="font-mono text-xs text-faint">
+            {rows.length} {rows.length === 1 ? 'call' : 'calls'}
+          </p>
+          <button
+            type="button"
+            onClick={exportRows}
+            disabled={rows.length === 0}
+            className="btn-ghost !px-3 !py-1.5 text-xs disabled:opacity-40"
+          >
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -155,7 +194,17 @@ export function CallLogPage({
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-muted">
                     {entry.callerLabel}
                   </td>
-                  <td className="px-4 py-3 text-body">{entry.intent}</td>
+                  <td className="px-4 py-3 text-body">
+                    <span className="flex items-center gap-1.5">
+                      {entry.flaggedForReview && (
+                        <AlertTriangleIcon
+                          className="h-3.5 w-3.5 shrink-0 text-critical"
+                          aria-label="Flagged for review"
+                        />
+                      )}
+                      {entry.intent}
+                    </span>
+                  </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${OUTCOME_STYLE[entry.outcome]}`}

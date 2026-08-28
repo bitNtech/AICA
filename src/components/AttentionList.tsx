@@ -1,6 +1,5 @@
 import type { AttentionItem, CallLogSeed } from '../types'
-import { useUiStore } from '../store/ui'
-import { AlertCircleIcon, AlertTriangleIcon } from './icons'
+import { AlertCircleIcon, AlertTriangleIcon, CloseIcon } from './icons'
 
 const SEVERITY_CONFIG: Record<
   AttentionItem['severity'],
@@ -30,18 +29,17 @@ const SEVERITY_CONFIG: Record<
 }
 
 /** The trust-building panel — proudly shows "0 items" when clear, and
- * turns every flagged item into a one-click drill-down into the exact
- * records behind it, rather than a report to read and dismiss. */
+ * turns every flagged item into either a one-click drill-down into the
+ * exact records behind it, or a one-click dismissal once it's handled. */
 export function AttentionList({
   items,
   onNavigate,
+  onDismiss,
 }: {
   items: AttentionItem[]
   onNavigate: (id: string, filter?: CallLogSeed) => void
+  onDismiss: (id: string) => void
 }) {
-  const openDrawer = useUiStore((s) => s.openDrawer)
-  const closeDrawer = useUiStore((s) => s.closeDrawer)
-
   if (items.length === 0) {
     return (
       <div className="card flex items-center gap-3 px-5 py-6">
@@ -58,35 +56,8 @@ export function AttentionList({
     )
   }
 
-  function review(item: AttentionItem) {
-    openDrawer({
-      title: item.title,
-      subtitle: item.detail,
-      body: (
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-body">
-            Review this item and either confirm AICA's handling was correct
-            or send it back for a fix.
-          </p>
-          <div className="flex gap-2">
-            <button type="button" onClick={closeDrawer} className="btn-primary">
-              Mark as reviewed
-            </button>
-            <button type="button" onClick={closeDrawer} className="btn-ghost">
-              Dismiss
-            </button>
-          </div>
-        </div>
-      ),
-    })
-  }
-
   function open(item: AttentionItem) {
-    if (item.target) {
-      onNavigate(item.target, item.targetFilter)
-    } else {
-      review(item)
-    }
+    if (item.target) onNavigate(item.target, item.targetFilter)
   }
 
   return (
@@ -98,7 +69,9 @@ export function AttentionList({
           <li
             key={item.id}
             onClick={() => open(item)}
-            className={`card flex cursor-pointer items-start gap-3.5 border-l-4 ${c.border} px-5 py-4 transition-colors duration-150 hover:bg-surface-hover`}
+            className={`card flex items-start gap-3.5 border-l-4 ${c.border} px-5 py-4 transition-colors duration-150 ${
+              item.target ? 'cursor-pointer hover:bg-surface-hover' : ''
+            }`}
           >
             <span
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${c.chipBg} ${c.text}`}
@@ -114,16 +87,32 @@ export function AttentionList({
               <p className="mt-0.5 text-sm font-medium text-body">{item.title}</p>
               <p className="mt-0.5 text-sm text-muted">{item.detail}</p>
             </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                open(item)
-              }}
-              className="btn-secondary shrink-0 !px-3.5 !py-1.5 text-xs"
-            >
-              {item.target ? 'View' : 'Review'}
-            </button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {item.target && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    open(item)
+                  }}
+                  className="btn-secondary !px-3.5 !py-1.5 text-xs"
+                >
+                  View
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDismiss(item.id)
+                }}
+                aria-label="Dismiss"
+                title="Dismiss"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-faint transition-colors hover:bg-surface-hover hover:text-body"
+              >
+                <CloseIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </li>
         )
       })}

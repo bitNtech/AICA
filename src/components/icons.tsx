@@ -25,14 +25,6 @@ function base(props: IconProps, children: ReactNode) {
 export const DashboardIcon = (p: IconProps) =>
   base(p, <path d="M4 13.5 10 5.5 14 11 20 4M4 19h16M9 19v-4M15 19v-6" />)
 
-export const LiveCallsIcon = (p: IconProps) =>
-  base(
-    p,
-    <>
-      <path d="M5 4h3l1.5 4L7 9.5a11 11 0 0 0 7.5 7.5L16 15l4 1.5v3a1.5 1.5 0 0 1-1.6 1.5C10.6 20.4 3.6 13.4 3.5 5.6 3.5 4.7 4.2 4 5 4Z" />
-    </>,
-  )
-
 export const CallLogIcon = (p: IconProps) =>
   base(
     p,
@@ -68,16 +60,6 @@ export const SimulationIcon = (p: IconProps) =>
     <>
       <path d="M9 4v5.2L5.4 17c-.7 1.4.3 3 1.9 3h9.4c1.6 0 2.6-1.6 1.9-3L15 9.2V4" />
       <path d="M8 4h8M8.5 13h7" />
-    </>,
-  )
-
-export const RolloutIcon = (p: IconProps) =>
-  base(
-    p,
-    <>
-      <path d="M12 3c3 2.5 4.5 6 4.5 9.5S15 19 12 21c-3-2-4.5-5-4.5-8.5S9 5.5 12 3Z" />
-      <circle cx="12" cy="11" r="1.8" />
-      <path d="M8 18.5 5.5 21M16 18.5 18.5 21" />
     </>,
   )
 
@@ -171,6 +153,16 @@ export const AlertCircleIcon = (p: IconProps) =>
   )
 
 export const CheckIcon = (p: IconProps) => base(p, <path d="m5 12.5 4.5 4.5L19 7" />)
+
+export const HelpIcon = (p: IconProps) =>
+  base(
+    p,
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.5 9.3a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2-2.4 3.6" />
+      <circle cx="12" cy="16.8" r="0.9" fill="currentColor" stroke="none" />
+    </>,
+  )
 
 export const LinkIcon = (p: IconProps) =>
   base(

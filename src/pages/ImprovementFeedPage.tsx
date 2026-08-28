@@ -12,7 +12,7 @@ const STATUS_COPY: Record<ImprovementStatus, string> = {
   dismissed: 'Dismissed',
 }
 
-const LOOP_STAGES = ['Drafted', 'Simulation', 'Rollout'] as const
+const LOOP_STAGES = ['Drafted', 'Simulation', 'Live'] as const
 
 function loopIndex(status: ImprovementStatus): number {
   if (status === 'approved') return 3
@@ -27,13 +27,17 @@ export function ImprovementFeedPage() {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)))
   }
 
+  function setAfterText(id: string, after: string) {
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, after } : i)))
+  }
+
   const visible = items.filter((i) => i.status !== 'dismissed')
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted">
-        Drawn from calls AICA couldn't answer confidently this week. Approve
-        a fix and it's queued into Simulation before going live — nothing
+        Drawn from calls AICA couldn't answer confidently this week. Edit the draft if the wording
+        isn't right, then approve it — it's queued into Simulation before going live, nothing
         ships without a check.
       </p>
 
@@ -44,7 +48,12 @@ export function ImprovementFeedPage() {
         />
       ) : (
         visible.map((item) => (
-          <ImprovementCard key={item.id} item={item} onSetStatus={setStatus} />
+          <ImprovementCard
+            key={item.id}
+            item={item}
+            onSetStatus={setStatus}
+            onAfterChange={setAfterText}
+          />
         ))
       )}
     </div>
@@ -54,9 +63,11 @@ export function ImprovementFeedPage() {
 function ImprovementCard({
   item,
   onSetStatus,
+  onAfterChange,
 }: {
   item: ImprovementItem
   onSetStatus: (id: string, status: ImprovementStatus) => void
+  onAfterChange: (id: string, after: string) => void
 }) {
   const stage = loopIndex(item.status)
 
@@ -73,7 +84,11 @@ function ImprovementCard({
       </div>
 
       <div className="mt-4">
-        <DiffCard before={item.before} after={item.after} />
+        <DiffCard
+          before={item.before}
+          after={item.after}
+          onAfterChange={item.status === 'pending' ? (next) => onAfterChange(item.id, next) : undefined}
+        />
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-4">

@@ -40,9 +40,11 @@
   --color-info: #4ea8de; /* neutral informational */
   --color-insight: #8b7cf6; /* AI intelligence / automation */
 
-  /* ---- Type — Fraunces (display) / Inter (UI) / IBM Plex Mono (data) ---- */
+  /* ---- Type — Fraunces (display) / Inter (chrome — nav rail, top bar) /
+     Plus Jakarta Sans (main content body) / IBM Plex Mono (data) ---- */
   --font-display: "Fraunces", ui-serif, Georgia, serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-content: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
   /* ---- Type scale — 12 / 14 / 16 / 20 / 26 / 34 / 48, 16px root ---- */

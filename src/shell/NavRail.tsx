@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ReactElement } from 'react'
-import { footerNav, mockLiveCalls, primaryNav } from '../data/mock'
-import { PulseLine } from '../components/PulseLine'
+import { footerNav, primaryNav, supportNav } from '../data/mock'
+import aicaMark from '../assets/aica-mark-light.png'
 import type { NavItem } from '../types'
 import {
   AgentBuilderIcon,
@@ -10,40 +10,35 @@ import {
   ChevronsRightIcon,
   ComplianceIcon,
   DashboardIcon,
-  DataReadinessIcon,
+  HelpIcon,
   ImprovementFeedIcon,
   IntegrationsIcon,
   KnowledgeBaseIcon,
-  LiveCallsIcon,
-  RolloutIcon,
   SettingsIcon,
   SimulationIcon,
 } from '../components/icons'
 
 const ICONS: Record<string, (props: { className?: string }) => ReactElement> = {
   dashboard: DashboardIcon,
-  'live-calls': LiveCallsIcon,
   'call-log': CallLogIcon,
   'knowledge-base': KnowledgeBaseIcon,
   'agent-builder': AgentBuilderIcon,
   simulation: SimulationIcon,
-  rollout: RolloutIcon,
   'improvement-feed': ImprovementFeedIcon,
-  'data-readiness': DataReadinessIcon,
   compliance: ComplianceIcon,
   integrations: IntegrationsIcon,
   settings: SettingsIcon,
+  help: HelpIcon,
 }
 
 /** Conceptual grouping of the primary nav — same items, just structured so
  * the rail reads as a system rather than a flat list. */
 const GROUPS: { label: string; ids: string[] }[] = [
-  { label: 'Operations', ids: ['dashboard', 'live-calls', 'call-log'] },
+  { label: 'Operations', ids: ['dashboard', 'call-log'] },
   {
     label: 'Intelligence',
-    ids: ['knowledge-base', 'agent-builder', 'simulation', 'data-readiness'],
+    ids: ['knowledge-base', 'agent-builder', 'simulation', 'improvement-feed'],
   },
-  { label: 'Deployment', ids: ['rollout', 'improvement-feed'] },
 ]
 
 interface NavRailProps {
@@ -63,13 +58,12 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
         expanded ? 'lg:w-64' : 'lg:w-[72px]'
       }`}
     >
-      <div className="flex h-16 shrink-0 items-center gap-2.5 px-4 lg:px-5">
-        <PulseLine
-          mode="idle"
-          height={20}
-          className="w-8 shrink-0 text-mist"
-          aria-label="AICA"
-        />
+      <div
+        className={`flex h-16 shrink-0 items-center px-4 lg:px-5 ${
+          expanded ? 'gap-2.5' : 'lg:flex-col lg:justify-center lg:gap-1.5'
+        }`}
+      >
+        <img src={aicaMark} alt="" className="h-7 w-7 shrink-0" aria-hidden="true" />
         {expanded && (
           <span className="hidden truncate font-display text-lg font-normal tracking-tight text-mist lg:inline">
             AICA
@@ -79,7 +73,9 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
           type="button"
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          className="ml-auto hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-mist/45 transition-colors hover:bg-white/10 hover:text-mist lg:flex"
+          className={`hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-mist/45 transition-colors hover:bg-white/10 hover:text-mist lg:flex ${
+            expanded ? 'ml-auto' : ''
+          }`}
         >
           {collapsed ? (
             <ChevronsRightIcon className="h-4 w-4" />
@@ -116,8 +112,6 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
         ))}
       </div>
 
-      {expanded && <PulseTicker onOpenLiveCalls={() => onSelect('live-calls')} />}
-
       <div className="border-t border-white/10 px-2 py-3 lg:px-3">
         {expanded && (
           <p className="hidden px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/40 lg:block">
@@ -126,6 +120,21 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
         )}
         <ul className="flex flex-col gap-0.5">
           {footerNav.map((item) => (
+            <NavRow
+              key={item.id}
+              item={item}
+              active={item.id === activeId}
+              onSelect={onSelect}
+              expanded={expanded}
+              muted
+            />
+          ))}
+        </ul>
+      </div>
+
+      <div className="border-t border-white/10 px-2 py-3 lg:px-3">
+        <ul className="flex flex-col gap-0.5">
+          {supportNav.map((item) => (
             <NavRow
               key={item.id}
               item={item}
@@ -191,50 +200,5 @@ function NavRow({
         ) : null}
       </button>
     </li>
-  )
-}
-
-function PulseTicker({ onOpenLiveCalls }: { onOpenLiveCalls: () => void }) {
-  const visible = mockLiveCalls.slice(0, 3)
-  const overflow = mockLiveCalls.length - visible.length
-
-  return (
-    <div className="hidden border-t border-white/10 px-3 py-3 lg:block">
-      <p className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/40">
-        <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-mist opacity-60" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-mist" />
-        </span>
-        {mockLiveCalls.length} calls in progress
-      </p>
-      <ul className="flex flex-col gap-1.5">
-        {visible.map((call) => (
-          <li key={call.id}>
-            <button
-              type="button"
-              onClick={onOpenLiveCalls}
-              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-white/10"
-            >
-              <PulseLine
-                mode="live"
-                height={16}
-                className="w-8 shrink-0 text-mist"
-                aria-label={`Live call: ${call.intent}`}
-              />
-              <span className="truncate text-xs text-mist/65">{call.intent}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {overflow > 0 && (
-        <button
-          type="button"
-          onClick={onOpenLiveCalls}
-          className="mt-1.5 text-[11px] font-medium text-mist/40 hover:text-mist/70"
-        >
-          +{overflow} more
-        </button>
-      )}
-    </div>
   )
 }

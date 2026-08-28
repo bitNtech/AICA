@@ -1,23 +1,29 @@
 import type {
   AgentFlowEdge,
   AgentFlowNode,
+  AgentSetupStage,
   AgentStatus,
   AttentionItem,
+  AttributeField,
   AuditLogEntry,
+  BehaviorSlider,
+  BehaviorToggle,
   CallLogEntry,
   DocConflict,
+  GlobalFlow,
   ImprovementItem,
   Integration,
-  IntentThreshold,
   KnowledgeDoc,
+  LineType,
   LiveCall,
   NavItem,
-  ReadinessSource,
   RedactionExample,
   Role,
   SimulationCall,
   SimulationRun,
   StatSeries,
+  UsageMetric,
+  UserAccount,
 } from '../types'
 
 /**
@@ -32,7 +38,35 @@ export const mockAgentStatus: AgentStatus = 'answering'
 export const mockOrg = {
   name: 'Riverside Family Clinic',
   initials: 'RF',
+  plan: 'Growth plan',
 }
+
+export const mockUsage: UsageMetric[] = [
+  {
+    id: 'cost',
+    label: 'Cost this month',
+    value: '$412.80',
+    used: 412.8,
+    limit: 600,
+    unit: 'USD',
+  },
+  {
+    id: 'compute',
+    label: 'AI compute minutes',
+    value: '3,240 min',
+    used: 3240,
+    limit: 5000,
+    unit: 'min',
+  },
+  {
+    id: 'storage',
+    label: 'Knowledge base storage',
+    value: '1.2 GB',
+    used: 1.2,
+    limit: 5,
+    unit: 'GB',
+  },
+]
 
 export const mockCitationSource = {
   docTitle: 'Front Desk Hours — Updated',
@@ -124,24 +158,16 @@ export const mockLiveCalls: LiveCall[] = [
 
 export const primaryNav: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', href: '/' },
-  {
-    id: 'live-calls',
-    label: 'Live Calls',
-    href: '/live-calls',
-    badge: mockLiveCalls.length,
-  },
   { id: 'call-log', label: 'Call Log', href: '/call-log' },
   { id: 'knowledge-base', label: 'Knowledge Base', href: '/knowledge-base' },
   { id: 'agent-builder', label: 'Agent Builder', href: '/agent-builder' },
   { id: 'simulation', label: 'Simulation & Testing', href: '/simulation' },
-  { id: 'rollout', label: 'Rollout', href: '/rollout' },
   {
     id: 'improvement-feed',
     label: 'Improvement Feed',
     href: '/improvement-feed',
     badge: 2,
   },
-  { id: 'data-readiness', label: 'Data Readiness', href: '/data-readiness' },
 ]
 
 export const footerNav: NavItem[] = [
@@ -149,6 +175,19 @@ export const footerNav: NavItem[] = [
   { id: 'integrations', label: 'Integrations', href: '/integrations' },
   { id: 'settings', label: 'Settings', href: '/settings' },
 ]
+
+export const supportNav: NavItem[] = [
+  { id: 'help', label: 'Help & Contact', href: '/help' },
+]
+
+export const mockVendor = {
+  name: 'BitnTech',
+  tagline: 'AICA is designed and engineered by BitnTech.',
+  supportEmail: 'support@bitntech.com',
+  supportPhone: '+1 (415) 555-0148',
+  website: 'www.bitntech.com',
+  hours: 'Mon–Fri, 8am–7pm ET',
+}
 
 export const mockAttentionItems: AttentionItem[] = [
   {
@@ -249,6 +288,8 @@ export const mockKnowledgeDocs: KnowledgeDoc[] = [
     updatedAt: new Date(Date.now() - 2 * day).toISOString(),
     sizeLabel: '4 pages',
     conflictId: 'conflict-1',
+    excerpt:
+      '"Rescheduling requests within 24 hours of an appointment should be routed to the on-call coordinator rather than confirmed automatically."',
   },
   {
     id: 'doc-2',
@@ -257,6 +298,8 @@ export const mockKnowledgeDocs: KnowledgeDoc[] = [
     updatedAt: new Date(Date.now() - 6 * day).toISOString(),
     sizeLabel: '1 page',
     conflictId: 'conflict-1',
+    excerpt:
+      '"During the holiday period (Dec 20–Jan 2), all rescheduling requests are confirmed automatically, regardless of notice given."',
   },
   {
     id: 'doc-3',
@@ -264,6 +307,8 @@ export const mockKnowledgeDocs: KnowledgeDoc[] = [
     status: 'fresh',
     updatedAt: new Date(Date.now() - 5 * day).toISOString(),
     sizeLabel: '8 pages',
+    excerpt:
+      '"New patients should have their insurance card, photo ID, and a list of current medications ready for their first visit."',
   },
   {
     id: 'doc-4',
@@ -271,6 +316,8 @@ export const mockKnowledgeDocs: KnowledgeDoc[] = [
     status: 'stale',
     updatedAt: new Date(Date.now() - 95 * day).toISOString(),
     sizeLabel: '3 pages',
+    excerpt:
+      '"We accept Blue Cross, Aetna, Cigna, and UnitedHealthcare. Medicaid is accepted for pediatric patients only."',
   },
   {
     id: 'doc-5',
@@ -278,6 +325,8 @@ export const mockKnowledgeDocs: KnowledgeDoc[] = [
     status: 'fresh',
     updatedAt: new Date(Date.now() - 12 * day).toISOString(),
     sizeLabel: '2 pages',
+    excerpt:
+      '"Refill requests are confirmed with the pharmacy on file within one business day. Controlled substances always require a callback."',
   },
   {
     id: 'doc-6',
@@ -285,6 +334,8 @@ export const mockKnowledgeDocs: KnowledgeDoc[] = [
     status: 'fresh',
     updatedAt: new Date(Date.now() - 20 * day).toISOString(),
     sizeLabel: '3 pages',
+    excerpt:
+      '"Payment plans are available for balances over $200. A card on file is required to enroll."',
   },
   {
     id: 'doc-7',
@@ -292,6 +343,8 @@ export const mockKnowledgeDocs: KnowledgeDoc[] = [
     status: 'stale',
     updatedAt: new Date(Date.now() - 140 * day).toISOString(),
     sizeLabel: '1 page',
+    excerpt:
+      '"You\'ve reached Riverside Family Clinic after hours. For medical emergencies, please hang up and dial 911."',
   },
 ]
 
@@ -355,6 +408,88 @@ export const mockFlowEdges: AgentFlowEdge[] = [
   { id: 'e10', source: 'billing', target: 'redirect' },
   { id: 'e11', source: 'insurance', target: 'clinical' },
   { id: 'e12', source: 'clinical', target: 'redirect' },
+]
+
+// ---- Agent Builder: the 7-stage guided setup wizard ----
+
+export const mockAgentSetupStages: AgentSetupStage[] = [
+  { id: 1, key: 'type', label: 'Type & sub-type', badge: 'Auto-detected' },
+  { id: 2, key: 'behaviour', label: 'Bot behaviour', badge: 'Fingerprinted' },
+  { id: 3, key: 'flow', label: 'Conversation flow', badge: 'Drafted from calls' },
+  { id: 4, key: 'attributes', label: 'Attributes', badge: 'Suggested' },
+  { id: 5, key: 'global-flows', label: 'Global flows', badge: 'Always available' },
+  { id: 6, key: 'context', label: 'Additional context', badge: 'Indexed' },
+  { id: 7, key: 'review', label: 'Review & confirm', badge: 'Simulated' },
+]
+
+export const mockLineTypes: LineType[] = [
+  { id: 'inbound', label: 'Inbound support & booking', detail: 'Answer, triage, resolve or book', matchPercent: 78 },
+  { id: 'sales', label: 'Sales qualification', detail: 'Score, qualify, route to a rep' },
+  { id: 'after-hours', label: 'After-hours overflow', detail: "Catch what the team can't", matchPercent: 14 },
+  { id: 'outbound', label: 'Outbound follow-up', detail: 'Reminders, confirmations, win-back' },
+  { id: 'collections', label: 'Collections & reminders', detail: 'Payment nudges with compliance rails' },
+  { id: 'switchboard', label: 'Switchboard & routing', detail: 'Identify and transfer, nothing more' },
+]
+
+export const mockSelectedLineType = 'inbound'
+
+export const mockBehaviorSliders: BehaviorSlider[] = [
+  { id: 'warmth', label: 'Warmth', value: 72, matched: true },
+  { id: 'pace', label: 'Speaking pace', value: 58, matched: true },
+  { id: 'verbosity', label: 'Verbosity', value: 34, matched: false },
+  { id: 'formality', label: 'Formality', value: 46, matched: true },
+  { id: 'persistence', label: 'Persistence on objections', value: 61, matched: true },
+]
+
+export const mockBehaviorToggles: BehaviorToggle[] = [
+  { id: 'mirror-pace', label: "Mirror the caller's pace", enabled: true },
+  { id: 'barge-in', label: 'Allow interruption (barge-in)', enabled: true },
+  { id: 'team-phrasing', label: "Use the team's own phrasings", enabled: true },
+  { id: 'small-talk', label: 'Light small talk', enabled: false },
+]
+
+export const mockAttributeFields: AttributeField[] = [
+  { name: 'full_name', type: 'Text', validation: 'Two or more tokens', required: true, capturedAt: 'Greeting', mapsTo: 'Contact.Name' },
+  { name: 'mobile', type: 'Phone', validation: 'E.164 + spell-back confirm', required: true, capturedAt: 'Detect intent', mapsTo: 'Contact.Phone' },
+  { name: 'patient_ref', type: 'ID', validation: '6 digits, checksum', required: false, capturedAt: 'Detect intent', mapsTo: 'Patient.Ref' },
+  { name: 'appt_window', type: 'DateRange', validation: 'Opening hours + provider roster', required: true, capturedAt: 'Book · step 2', mapsTo: 'Event.Slot' },
+  { name: 'reason_code', type: 'Enum · 6', validation: 'From intent model, human-reviewable', required: true, capturedAt: 'Automatic', mapsTo: 'Case.Type' },
+  { name: 'consent_sms', type: 'Boolean', validation: 'Verbal, timestamped, recorded', required: true, capturedAt: 'Close', mapsTo: 'Contact.OptIn' },
+]
+
+export const mockUnmappedAttributes = [
+  { label: 'insurance_provider', askedPercent: 61 },
+  { label: 'referral_source', askedPercent: 44 },
+  { label: 'preferred_clinician', askedPercent: 38 },
+]
+
+export const mockGlobalFlows: GlobalFlow[] = [
+  { id: 'transfer', label: 'Transfer to a human', detail: 'Warm — 8-second spoken brief + screen pop', enabled: true },
+  { id: 'take-message', label: 'Take a message', detail: 'Structured, routed by reason_code', enabled: true },
+  { id: 'repeat', label: 'Repeat & spell back', detail: 'On request or low ASR confidence', enabled: true },
+  { id: 'hold', label: 'Hold & look-up', detail: 'Ambient audio while a tool call runs', enabled: true },
+  { id: 'voicemail', label: 'Voicemail detection', detail: 'Detect machine → leave the right message', enabled: true },
+  { id: 'silence', label: 'Silence & hang-up recovery', detail: 'Two prompts, then graceful close + callback', enabled: true },
+  { id: 'frustration', label: 'Frustration escalation', detail: 'Sentiment below −0.4 → human, no questions asked', enabled: true },
+  { id: 'disclosure', label: 'Compliance disclosure', detail: 'Recording + AI notice within first 8 seconds', enabled: true },
+  { id: 'payment', label: 'Secure payment capture', detail: 'PCI-safe DTMF, digits never transcribed', enabled: false },
+  { id: 'language', label: 'Language switch mid-call', detail: "Detect and continue in the caller's language", enabled: false },
+]
+
+export const mockSetupChanges: string[] = [
+  '+ flow  weekend_availability',
+  '+ flow  insurance_coverage_q',
+  '~ behaviour.verbosity  41 → 34',
+  '+ attr  referral_source',
+  '~ transfer.hours  Sat added',
+]
+
+export const mockPreflightChecks: { label: string; passed: boolean }[] = [
+  { label: 'No unreachable nodes in the tree', passed: true },
+  { label: 'Required attributes captured on every path', passed: true },
+  { label: 'Never-say list: 0 violations in 240 sims', passed: true },
+  { label: 'Escalation route present on all branches', passed: true },
+  { label: 'PII redaction active on ingest and runtime', passed: true },
 ]
 
 export const mockSimulationRun: SimulationRun = {
@@ -424,21 +559,6 @@ export const mockSimulationCalls: SimulationCall[] = [
   },
 ]
 
-export const mockRollout = {
-  stages: [0, 10, 50, 100],
-  currentStageIndex: 2,
-  matchedHumanRateByStage: { 0: null, 10: 88, 50: 91, 100: null } as Record<number, number | null>,
-}
-
-export const mockIntentThresholds: IntentThreshold[] = [
-  { intent: 'Scheduling', floor: 0.6 },
-  { intent: 'Hours & location', floor: 0.5 },
-  { intent: 'Prescription refill', floor: 0.68 },
-  { intent: 'Insurance question', floor: 0.75 },
-  { intent: 'Billing dispute', floor: 0.85 },
-  { intent: 'Clinical question', floor: 1 },
-]
-
 export const mockImprovementItems: ImprovementItem[] = [
   {
     id: 'imp-1',
@@ -472,37 +592,11 @@ export const mockImprovementItems: ImprovementItem[] = [
   },
 ]
 
-export const mockReadinessSources: ReadinessSource[] = [
-  {
-    id: 'call-archive',
-    label: 'Call archive',
-    percent: 82,
-    detail: '1,240 historical calls imported, most with clear outcomes.',
-    nextStep: 'Upload the last 3 months to improve recent-intent coverage.',
-  },
-  {
-    id: 'crm-export',
-    label: 'CRM / EHR export',
-    percent: 46,
-    detail: 'Outcome labels are missing for about half of imported records.',
-    nextStep: 'Connect your EHR directly, or use the Call Log bulk-tagging tool.',
-  },
-  {
-    id: 'documents',
-    label: 'Document uploads',
-    percent: 91,
-    detail: '7 policy documents indexed and current.',
-    nextStep: 'Resolve the 1 conflicting document in Knowledge Base.',
-  },
-]
-
-export const mockOverallReadiness = 70
-
 export const mockAuditLog: AuditLogEntry[] = [
   { id: 'audit-1', actor: 'Priya N.', action: 'Changed confidence floor', target: 'Insurance question → 75%', timestamp: new Date(Date.now() - 3_600_000).toISOString() },
   { id: 'audit-2', actor: 'AICA (automated)', action: 'Approved improvement', target: '"143 callers asked about Saturday slots"', timestamp: new Date(Date.now() - 7_200_000).toISOString() },
   { id: 'audit-3', actor: 'Marcus D.', action: 'Resolved conflict', target: '"Front Desk Hours — Updated" vs "2026 Holiday Hours"', timestamp: new Date(Date.now() - 26_000_000).toISOString() },
-  { id: 'audit-4', actor: 'Priya N.', action: 'Advanced rollout stage', target: '10% → 50%', timestamp: new Date(Date.now() - 90_000_000).toISOString() },
+  { id: 'audit-4', actor: 'Priya N.', action: 'Published agent config', target: 'v1.4 → v1.5', timestamp: new Date(Date.now() - 90_000_000).toISOString() },
   { id: 'audit-5', actor: 'Marcus D.', action: 'Uploaded document', target: 'Prescription Refill Policy', timestamp: new Date(Date.now() - 1_036_800_000).toISOString() },
 ]
 
@@ -521,16 +615,16 @@ export const mockRoles: Role[] = [
   {
     id: 'admin',
     name: 'Admin',
-    description: 'Full control, including rollout stage and confidence floors.',
-    canDo: ['Change rollout stage', 'Edit confidence floors', 'Manage users', 'Approve improvements'],
+    description: 'Full control, including publishing agent changes and confidence floors.',
+    canDo: ['Publish agent changes', 'Edit confidence floors', 'Manage users', 'Approve improvements'],
     cannotDo: [],
   },
   {
     id: 'reviewer',
     name: 'Reviewer',
-    description: 'Reviews calls and approves improvements, no rollout or user control.',
+    description: 'Reviews calls and approves improvements, no publishing or user control.',
     canDo: ['Tag call outcomes', 'Approve or dismiss improvements', 'Resolve document conflicts'],
-    cannotDo: ['Change rollout stage', 'Manage users', 'Edit confidence floors'],
+    cannotDo: ['Publish agent changes', 'Manage users', 'Edit confidence floors'],
   },
   {
     id: 'read-only',
@@ -539,6 +633,12 @@ export const mockRoles: Role[] = [
     canDo: ['View all dashboards, logs, and transcripts'],
     cannotDo: ['Edit anything', 'Approve or dismiss items', 'Export data'],
   },
+]
+
+export const mockUsers: UserAccount[] = [
+  { id: 'user-1', name: 'Priya N.', email: 'priya@riversidefamily.example', roleId: 'admin' },
+  { id: 'user-2', name: 'Marcus D.', email: 'marcus@riversidefamily.example', roleId: 'reviewer' },
+  { id: 'user-3', name: 'Aisha K.', email: 'aisha@riversidefamily.example', roleId: 'read-only' },
 ]
 
 export const mockIntegrations: Integration[] = [

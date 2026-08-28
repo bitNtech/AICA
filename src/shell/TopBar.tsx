@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentStatus } from '../types'
-import { mockOrg } from '../data/mock'
+import type { AgentStatus, UsageMetric } from '../types'
+import { mockOrg, mockUsage } from '../data/mock'
 import { ChevronDownIcon, SearchIcon } from '../components/icons'
 
 const STATUS_CONFIG: Record<
@@ -89,30 +89,54 @@ function OrgMenu() {
         <ChevronDownIcon className="h-3.5 w-3.5 text-faint" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-60 rounded-2xl border border-hairline bg-surface-elevated py-1.5 shadow-lg">
-          <p className="truncate px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wider text-faint">
-            Workspace
-          </p>
-          <p className="truncate px-3 pb-2 text-sm font-medium text-body">
-            {mockOrg.name}
-          </p>
-          <div className="mx-1.5 mb-1.5 border-t border-hairline" />
-          <MenuItem label="Compliance & Audit" />
-          <MenuItem label="Integrations" />
-          <MenuItem label="Settings" />
+        <div className="absolute right-0 top-full z-30 mt-2 w-64 rounded-2xl border border-hairline bg-surface-elevated py-1.5 shadow-lg">
+          <div className="flex items-center gap-2.5 px-3 py-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-teal text-xs font-semibold text-mist">
+              {mockOrg.initials}
+            </span>
+            <div className="min-w-0">
+              <p className="text-[10.5px] font-semibold uppercase tracking-wider text-faint">
+                {mockOrg.plan}
+              </p>
+              <p className="truncate text-sm font-medium text-body">{mockOrg.name}</p>
+            </div>
+          </div>
+          <div className="mx-1.5 mb-1 border-t border-hairline" />
+          <div className="px-3 pb-2 pt-1.5">
+            <p className="pb-2 text-[10.5px] font-semibold uppercase tracking-wider text-faint">
+              Usage this month
+            </p>
+            <div className="flex flex-col gap-3">
+              {mockUsage.map((metric) => (
+                <UsageRow key={metric.id} metric={metric} />
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function MenuItem({ label }: { label: string }) {
+function UsageRow({ metric }: { metric: UsageMetric }) {
+  const percent = Math.min(100, Math.round((metric.used / metric.limit) * 100))
+  const near = percent >= 90
+
   return (
-    <button
-      type="button"
-      className="mx-1.5 block w-[calc(100%-12px)] rounded-lg px-3 py-1.5 text-left text-sm text-body hover:bg-surface-hover"
-    >
-      {label}
-    </button>
+    <div>
+      <div className="flex items-baseline justify-between gap-2 text-sm">
+        <span className="text-body">{metric.label}</span>
+        <span className="font-medium text-body">{metric.value}</span>
+      </div>
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-canvas">
+        <div
+          className={`h-full rounded-full ${near ? 'bg-critical' : 'bg-pulse'}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p className="mt-1 text-xs text-faint">
+        {percent}% of {metric.limit.toLocaleString()} {metric.unit} included
+      </p>
+    </div>
   )
 }

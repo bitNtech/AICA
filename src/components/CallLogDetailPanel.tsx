@@ -1,18 +1,48 @@
 import { useState } from 'react'
-import type { CallLogEntry } from '../types'
+import type { CallLogEntry, CallOutcome } from '../types'
 import { PulseLine } from './PulseLine'
 import { ConfidenceBadge } from './ConfidenceBadge'
 import { CitationChip } from './CitationChip'
 import { CitationSourceCard } from './CitationSourceCard'
 import { formatDuration } from '../lib/format'
-import { useUiStore } from '../store/ui'
+import { AlertTriangleIcon } from './icons'
+
+const OUTCOME_LABEL: Record<CallOutcome, string> = {
+  resolved: 'Resolved by AICA',
+  redirected: 'Redirected to staff',
+  voicemail: 'Voicemail taken',
+  no_answer_redirect: 'Redirected — no answer',
+}
 
 /** Historical call detail — a completed call, so the Pulse Line settles
  * into its end mode rather than the live scroll. Outcome tag is editable:
- * this is how staff correct the resolver's guess when CRM data is thin. */
-export function CallLogDetailPanel({ entry }: { entry: CallLogEntry }) {
+ * this is how staff correct the resolver's guess when CRM data is thin. Both
+ * edits persist back to the Call Log table via `onUpdate`, not just this
+ * drawer. */
+export function CallLogDetailPanel({
+  entry,
+  onUpdate,
+}: {
+  entry: CallLogEntry
+  onUpdate: (patch: Partial<CallLogEntry>) => void
+}) {
   const [showSource, setShowSource] = useState(false)
-  const closeDrawer = useUiStore((s) => s.closeDrawer)
+  // Local state, not the `entry` prop directly: the drawer's body is a
+  // snapshot handed to the global drawer store once at open time, so it
+  // won't re-render on its own when `onUpdate` changes the source row.
+  const [outcome, setOutcome] = useState(entry.outcome)
+  const [flagged, setFlagged] = useState(entry.flaggedForReview ?? false)
+
+  function changeOutcome(next: CallOutcome) {
+    setOutcome(next)
+    onUpdate({ outcome: next, outcomeLabel: OUTCOME_LABEL[next] })
+  }
+
+  function toggleFlag() {
+    const next = !flagged
+    setFlagged(next)
+    onUpdate({ flaggedForReview: next })
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -35,7 +65,8 @@ export function CallLogDetailPanel({ entry }: { entry: CallLogEntry }) {
           Outcome
         </label>
         <select
-          defaultValue={entry.outcome}
+          value={outcome}
+          onChange={(e) => changeOutcome(e.target.value as CallOutcome)}
           className="mt-1.5 w-full rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm text-body transition-colors focus:border-pulse/50 focus:outline-none"
         >
           <option value="resolved">Resolved by AICA</option>
@@ -84,10 +115,16 @@ export function CallLogDetailPanel({ entry }: { entry: CallLogEntry }) {
         </div>
       )}
 
-      <div className="flex gap-2 border-t border-hairline pt-5">
-        <button type="button" onClick={closeDrawer} className="btn-secondary">
-          Flag for review
+      <div className="flex items-center gap-2 border-t border-hairline pt-5">
+        <button
+          type="button"
+          onClick={toggleFlag}
+          className={flagged ? 'btn-danger' : 'btn-secondary'}
+        >
+          <AlertTriangleIcon className="h-3.5 w-3.5" />
+          {flagged ? 'Flagged for review' : 'Flag for review'}
         </button>
+        {flagged && <span className="text-xs text-muted">Visible on the Call Log table</span>}
       </div>
     </div>
   )

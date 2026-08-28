@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { mockIntegrations } from '../data/mock'
-import type { IntegrationStatus } from '../types'
+import type { Integration, IntegrationStatus } from '../types'
 import { IntegrationsIcon } from '../components/icons'
+import { useUiStore } from '../store/ui'
 
 const STATUS_CONFIG: Record<IntegrationStatus, { label: string; className: string; dot: string }> = {
   connected: { label: 'Connected', className: 'bg-sage/12 text-sage', dot: 'bg-sage' },
@@ -9,9 +11,43 @@ const STATUS_CONFIG: Record<IntegrationStatus, { label: string; className: strin
 }
 
 export function IntegrationsPage() {
+  const [integrations, setIntegrations] = useState<Integration[]>(mockIntegrations)
+  const openDrawer = useUiStore((s) => s.openDrawer)
+  const closeDrawer = useUiStore((s) => s.closeDrawer)
+
+  function openManage(integration: Integration) {
+    openDrawer({
+      title: integration.name,
+      subtitle: integration.category,
+      body: (
+        <IntegrationDetail
+          integration={integration}
+          onConnected={() => {
+            setIntegrations((prev) =>
+              prev.map((it) =>
+                it.id === integration.id
+                  ? { ...it, status: 'connected', detail: 'Connected just now — syncing for the first time.' }
+                  : it,
+              ),
+            )
+            closeDrawer()
+          }}
+          onDisconnected={() => {
+            setIntegrations((prev) =>
+              prev.map((it) =>
+                it.id === integration.id ? { ...it, status: 'disconnected', detail: 'Not connected.' } : it,
+              ),
+            )
+            closeDrawer()
+          }}
+        />
+      ),
+    })
+  }
+
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      {mockIntegrations.map((integration) => {
+      {integrations.map((integration) => {
         const status = STATUS_CONFIG[integration.status]
         return (
           <div
@@ -35,13 +71,59 @@ export function IntegrationsPage() {
                 {integration.category}
               </p>
               <p className="mt-2 text-sm text-muted">{integration.detail}</p>
-              <button type="button" className="btn-secondary mt-3 !px-3.5 !py-1.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => openManage(integration)}
+                className="btn-secondary mt-3 !px-3.5 !py-1.5 text-xs font-semibold"
+              >
                 {integration.status === 'connected' ? 'Manage' : 'Connect'}
               </button>
             </div>
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function IntegrationDetail({
+  integration,
+  onConnected,
+  onDisconnected,
+}: {
+  integration: Integration
+  onConnected: () => void
+  onDisconnected: () => void
+}) {
+  const [connecting, setConnecting] = useState(false)
+
+  function connect() {
+    setConnecting(true)
+    setTimeout(onConnected, 900)
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-body">{integration.detail}</p>
+      <div className="rounded-xl border border-hairline bg-canvas p-3">
+        <p className="text-xs text-muted">Category</p>
+        <p className="mt-1 text-sm text-body">{integration.category}</p>
+      </div>
+
+      {integration.status === 'connected' ? (
+        <button type="button" onClick={onDisconnected} className="btn-danger self-start">
+          Disconnect
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={connect}
+          disabled={connecting}
+          className="btn-primary self-start"
+        >
+          {connecting ? 'Connecting…' : integration.status === 'error' ? 'Reconnect' : 'Connect'}
+        </button>
+      )}
     </div>
   )
 }

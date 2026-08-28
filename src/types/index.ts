@@ -33,6 +33,7 @@ export interface CallLogEntry {
   durationSec: number
   timestamp: string
   redirected: boolean
+  flaggedForReview?: boolean
 }
 
 export interface StatSeries {
@@ -79,6 +80,17 @@ export interface NavItem {
   badge?: number
 }
 
+/** A single billed/metered resource shown in the workspace usage summary
+ * (org menu) — cost and consumption against the plan's included quota. */
+export interface UsageMetric {
+  id: string
+  label: string
+  value: string
+  used: number
+  limit: number
+  unit: string
+}
+
 export type DocStatus = 'fresh' | 'stale' | 'conflicting'
 
 export interface KnowledgeDoc {
@@ -88,6 +100,8 @@ export interface KnowledgeDoc {
   updatedAt: string
   sizeLabel: string
   conflictId?: string
+  /** A representative snippet — what AICA actually cites from this document. */
+  excerpt: string
 }
 
 export interface DocConflict {
@@ -95,6 +109,51 @@ export interface DocConflict {
   topic: string
   docA: { title: string; excerpt: string }
   docB: { title: string; excerpt: string }
+}
+
+/** The 7-stage guided setup wizard — see Agent Builder. Every stage arrives
+ * pre-filled from the clinic's own call history, never a blank form. */
+export interface AgentSetupStage {
+  id: number
+  key: string
+  label: string
+  badge: string
+}
+
+export interface LineType {
+  id: string
+  label: string
+  detail: string
+  matchPercent?: number
+}
+
+export interface BehaviorSlider {
+  id: string
+  label: string
+  value: number
+  matched: boolean
+}
+
+export interface BehaviorToggle {
+  id: string
+  label: string
+  enabled: boolean
+}
+
+export interface AttributeField {
+  name: string
+  type: string
+  validation: string
+  required: boolean
+  capturedAt: string
+  mapsTo: string
+}
+
+export interface GlobalFlow {
+  id: string
+  label: string
+  detail: string
+  enabled: boolean
 }
 
 export type FlowNodeStatus = 'covered' | 'gap' | 'never-say'
@@ -138,11 +197,6 @@ export interface SimulationCall {
   ghost?: boolean
 }
 
-export interface IntentThreshold {
-  intent: string
-  floor: number
-}
-
 export type ImprovementStatus = 'pending' | 'queued' | 'approved' | 'dismissed'
 
 export interface ImprovementItem {
@@ -153,14 +207,6 @@ export interface ImprovementItem {
   before: string
   after: string
   status: ImprovementStatus
-}
-
-export interface ReadinessSource {
-  id: string
-  label: string
-  percent: number
-  detail: string
-  nextStep: string
 }
 
 export interface AuditLogEntry {
@@ -182,6 +228,14 @@ export interface Role {
   description: string
   canDo: string[]
   cannotDo: string[]
+}
+
+export interface UserAccount {
+  id: string
+  name: string
+  email: string
+  /** Matches `Role.id` in mockRoles. */
+  roleId: string
 }
 
 export type IntegrationStatus = 'connected' | 'disconnected' | 'error'

@@ -2,26 +2,24 @@ import { useState } from 'react'
 import { AppShell } from './shell/AppShell'
 import { EmptyState } from './components/EmptyState'
 import { Dashboard } from './pages/Dashboard'
-import { LiveCallsPage } from './pages/LiveCallsPage'
 import { CallLogPage } from './pages/CallLogPage'
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage'
 import { AgentBuilderPage } from './pages/AgentBuilderPage'
 import { SimulationPage } from './pages/SimulationPage'
-import { RolloutPage } from './pages/RolloutPage'
 import { ImprovementFeedPage } from './pages/ImprovementFeedPage'
-import { DataReadinessPage } from './pages/DataReadinessPage'
 import { CompliancePage } from './pages/CompliancePage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { footerNav, primaryNav } from './data/mock'
+import { HelpContactPage } from './pages/HelpContactPage'
+import { footerNav, primaryNav, supportNav } from './data/mock'
 import type { CallLogSeed } from './types'
 
 function App() {
   const [activeNavId, setActiveNavId] = useState('dashboard')
   const [callLogSeed, setCallLogSeed] = useState<CallLogSeed | undefined>()
   const activeLabel =
-    [...primaryNav, ...footerNav].find((n) => n.id === activeNavId)?.label ??
-    'Dashboard'
+    [...primaryNav, ...footerNav, ...supportNav].find((n) => n.id === activeNavId)
+      ?.label ?? 'Dashboard'
 
   // The one navigation entry point — used by the sidebar (plain id) and by
   // dashboard drill-downs (id + which Call Log rows to land on). Routing
@@ -64,8 +62,6 @@ function Page({
   switch (id) {
     case 'dashboard':
       return <Dashboard onNavigate={onNavigate} />
-    case 'live-calls':
-      return <LiveCallsPage />
     case 'call-log':
       return (
         <CallLogPage
@@ -77,21 +73,19 @@ function Page({
     case 'knowledge-base':
       return <KnowledgeBasePage />
     case 'agent-builder':
-      return <AgentBuilderPage />
+      return <AgentBuilderPage onNavigate={onNavigate} />
     case 'simulation':
       return <SimulationPage />
-    case 'rollout':
-      return <RolloutPage />
     case 'improvement-feed':
       return <ImprovementFeedPage />
-    case 'data-readiness':
-      return <DataReadinessPage />
     case 'compliance':
-      return <CompliancePage />
+      return <CompliancePage onNavigate={onNavigate} />
     case 'integrations':
       return <IntegrationsPage />
     case 'settings':
       return <SettingsPage />
+    case 'help':
+      return <HelpContactPage />
     default:
       return (
         <EmptyState
