@@ -112,6 +112,48 @@ body {
   scrollbar-gutter: stable;
 }
 
+.aica-page-content input,
+.aica-page-content select,
+.aica-page-content textarea {
+  border-color: rgb(149 177 158 / 55%);
+  background-color: rgb(255 255 255 / 32%);
+  backdrop-filter: blur(10px);
+}
+
+.aica-page-content input:hover,
+.aica-page-content select:hover,
+.aica-page-content textarea:hover {
+  border-color: rgb(121 168 141 / 75%);
+}
+
+.aica-page-content table tbody tr {
+  transition: background-color 180ms ease-out, box-shadow 180ms ease-out;
+}
+
+.aica-page-content table tbody tr:hover {
+  background-color: rgb(255 255 255 / 30%);
+  box-shadow: inset 3px 0 var(--color-pulse);
+}
+
+.aica-page-content table tbody tr:focus-within {
+  background-color: rgb(121 168 141 / 12%);
+  box-shadow: inset 3px 0 var(--color-pulse);
+}
+
+.aica-page-content ul > li > button {
+  transition: background-color 180ms ease-out, border-color 180ms ease-out, transform 180ms ease-out;
+}
+
+.aica-page-content ul > li > button:hover {
+  background-color: rgb(255 255 255 / 28%);
+  transform: translateX(3px);
+}
+
+.aica-page-content h2,
+.aica-page-content h3 {
+  text-wrap: balance;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .aica-header-title {
     animation: aica-header-title-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -163,6 +205,13 @@ body {
   }
   .aica-page-content > *:nth-child(4) {
     animation-delay: 135ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aica-page-content table tbody tr,
+  .aica-page-content ul > li > button {
+    transition: none;
   }
 }
 
