@@ -20,6 +20,8 @@ const SPLASH_SEEN_KEY = 'aica-splash-seen'
 function App() {
   const [activeNavId, setActiveNavId] = useState('dashboard')
   const [callLogSeed, setCallLogSeed] = useState<CallLogSeed | undefined>()
+  const [pageLoading, setPageLoading] = useState(false)
+  const [loadingKey, setLoadingKey] = useState(0)
   // Boot splash, once per tab — never on in-app navigation, which never
   // reloads this component anyway. sessionStorage clears the flag on close.
   const [showSplash, setShowSplash] = useState(
@@ -35,6 +37,8 @@ function App() {
   function navigate(id: string, seed?: CallLogSeed) {
     setActiveNavId(id)
     setCallLogSeed(id === 'call-log' ? seed : undefined)
+    setLoadingKey((key) => key + 1)
+    setPageLoading(true)
   }
 
   return (
@@ -45,6 +49,13 @@ function App() {
             sessionStorage.setItem(SPLASH_SEEN_KEY, '1')
             setShowSplash(false)
           }}
+        />
+      )}
+      {pageLoading && !showSplash && (
+        <LoadingScreen
+          key={loadingKey}
+          pageTransition
+          onDone={() => setPageLoading(false)}
         />
       )}
       <AppShell

@@ -34,8 +34,8 @@ export function TopBar({ title, liveCallCount, agentStatus, onNavigate }: TopBar
   const status = STATUS_CONFIG[agentStatus]
 
   return (
-    <header className="relative z-10 flex h-16 shrink-0 items-center gap-3 border-b border-hairline bg-surface px-4 sm:px-6">
-      <h1 className="shrink-0 truncate font-display text-xl font-normal text-body">{title}</h1>
+    <header className="aica-header relative z-10 flex h-16 shrink-0 items-center gap-3 border-b border-white/70 bg-white/65 px-4 backdrop-blur-xl sm:px-6">
+      <h1 className="aica-header-title shrink-0 truncate font-display text-xl font-normal text-body">{title}</h1>
 
       <div className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-pulse/10 px-3 py-1 text-sm font-medium text-pulse lg:flex">
         <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden="true">
@@ -47,7 +47,7 @@ export function TopBar({ title, liveCallCount, agentStatus, onNavigate }: TopBar
         {liveCallCount} live {liveCallCount === 1 ? 'call' : 'calls'}
       </div>
 
-      <div className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-hairline bg-canvas px-3 py-1 text-sm text-body xl:flex">
+      <div className="aica-status-chip hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-hairline bg-canvas px-3 py-1 text-sm text-body xl:flex">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status.dot}`} aria-hidden="true" />
         <span className="font-medium">{status.label}</span>
         <span className="hidden text-xs text-faint lg:inline">· {status.sub}</span>
@@ -143,7 +143,7 @@ function NotificationMenu({ onNavigate }: { onNavigate: (id: string, filter?: Ca
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-96 overflow-hidden rounded-2xl border border-hairline bg-surface-elevated shadow-lg">
+        <div className="aica-notification-panel absolute right-0 top-full z-30 mt-2 w-96 overflow-hidden rounded-2xl border border-hairline bg-surface-elevated shadow-lg">
           <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
             <div className="flex items-center gap-2">
               <p className="text-sm font-semibold text-body">Notifications</p>
