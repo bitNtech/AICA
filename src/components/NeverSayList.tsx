@@ -27,7 +27,7 @@ export function NeverSayList({ initial }: { initial: string[] }) {
         {items.map((item, i) => (
           <li
             key={item}
-            className="flex items-center gap-2 rounded-full border border-critical/25 bg-critical/[0.06] px-3 py-1.5 text-xs text-body"
+            className="flex items-center gap-2 rounded-full border border-critical/30 bg-critical/10 px-3 py-1.5 text-xs text-body"
           >
             {item}
             <button

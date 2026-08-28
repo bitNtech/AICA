@@ -17,11 +17,21 @@ const OUTCOME_STYLE: Record<CallOutcome, string> = {
 
 type SortKey = 'timestamp' | 'durationSec'
 
-export function CallLogPage() {
+export function CallLogPage({
+  initialSearch = '',
+  initialOutcomeFilter = 'all',
+  initialConfidenceFilter = 'all',
+}: {
+  initialSearch?: string
+  initialOutcomeFilter?: 'all' | CallOutcome
+  initialConfidenceFilter?: 'all' | ConfidenceLevel
+}) {
   const openDrawer = useUiStore((s) => s.openDrawer)
-  const [search, setSearch] = useState('')
-  const [outcomeFilter, setOutcomeFilter] = useState<'all' | CallOutcome>('all')
-  const [confidenceFilter, setConfidenceFilter] = useState<'all' | ConfidenceLevel>('all')
+  const [search, setSearch] = useState(initialSearch)
+  const [outcomeFilter, setOutcomeFilter] = useState<'all' | CallOutcome>(initialOutcomeFilter)
+  const [confidenceFilter, setConfidenceFilter] = useState<'all' | ConfidenceLevel>(
+    initialConfidenceFilter,
+  )
   const [sortKey, setSortKey] = useState<SortKey>('timestamp')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 

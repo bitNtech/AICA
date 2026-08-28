@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentStatus } from '../types'
 import { mockOrg } from '../data/mock'
-import { ChevronDownIcon, MoonIcon, SearchIcon, SunIcon } from '../components/icons'
-import { applyTheme, getStoredTheme, type Theme } from '../lib/theme'
+import { ChevronDownIcon, SearchIcon } from '../components/icons'
 
 const STATUS_CONFIG: Record<
   AgentStatus,
@@ -21,15 +20,6 @@ interface TopBarProps {
 
 export function TopBar({ title, liveCallCount, agentStatus }: TopBarProps) {
   const status = STATUS_CONFIG[agentStatus]
-  const [theme, setTheme] = useState<Theme>(
-    () => getStoredTheme() ?? (document.documentElement.classList.contains('dark') ? 'dark' : 'light'),
-  )
-
-  function toggleTheme() {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark'
-    setTheme(next)
-    applyTheme(next)
-  }
 
   return (
     <header className="relative z-10 flex h-16 shrink-0 items-center gap-3 border-b border-hairline bg-surface px-4 sm:px-6">
@@ -63,14 +53,6 @@ export function TopBar({ title, liveCallCount, agentStatus }: TopBarProps) {
             ⌘K
           </kbd>
         </label>
-        <button
-          type="button"
-          onClick={toggleTheme}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-hairline text-muted transition-colors hover:border-pulse/40 hover:text-pulse"
-        >
-          {theme === 'dark' ? <SunIcon className="h-4 w-4" /> : <MoonIcon className="h-4 w-4" />}
-        </button>
         <OrgMenu />
       </div>
     </header>

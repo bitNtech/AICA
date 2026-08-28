@@ -3,8 +3,8 @@ import type { FlowNodeStatus } from '../types'
 
 const STATUS_STYLE: Record<FlowNodeStatus, string> = {
   covered: 'border-sage/50 bg-surface',
-  gap: 'border-amber/60 bg-amber/[0.06]',
-  'never-say': 'border-critical/60 bg-critical/[0.06]',
+  gap: 'border-amber/60 bg-amber/10',
+  'never-say': 'border-critical/60 bg-critical/10',
 }
 
 const STATUS_DOT: Record<FlowNodeStatus, string> = {

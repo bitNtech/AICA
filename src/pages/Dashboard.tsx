@@ -1,16 +1,37 @@
-import { PulseLine } from '../components/PulseLine'
 import { StatCard } from '../components/StatCard'
-import { ConfidenceBadge } from '../components/ConfidenceBadge'
-import { AiStateIndicator } from '../components/AiStateIndicator'
+import type { DonutSegment } from '../components/DonutBreakdown'
 import { AttentionList } from '../components/AttentionList'
 import { CallDetailPanel } from '../components/CallDetailPanel'
-import { mockStats, mockLiveCalls, mockAttentionItems } from '../data/mock'
-import { useElapsedSeconds } from '../lib/useElapsedSeconds'
-import { formatDuration } from '../lib/format'
+import { CompactCallRow } from '../components/CompactCallRow'
+import { ChevronRightIcon } from '../components/icons'
+import {
+  mockStats,
+  mockLiveCalls,
+  mockAttentionItems,
+  mockCallLog,
+  mockSimulationRun,
+} from '../data/mock'
 import { useUiStore } from '../store/ui'
-import type { LiveCall } from '../types'
+import type { CallLogSeed, CallOutcome, LiveCall } from '../types'
 
-export function Dashboard() {
+const OUTCOME_LABEL: Record<CallOutcome, string> = {
+  resolved: 'Resolved by AICA',
+  redirected: 'Redirected',
+  voicemail: 'Voicemail',
+  no_answer_redirect: 'No answer — redirected',
+}
+const OUTCOME_COLOR: Record<CallOutcome, string> = {
+  resolved: 'text-sage',
+  redirected: 'text-amber',
+  voicemail: 'text-signal',
+  no_answer_redirect: 'text-critical',
+}
+
+export function Dashboard({
+  onNavigate,
+}: {
+  onNavigate: (id: string, filter?: CallLogSeed) => void
+}) {
   const openDrawer = useUiStore((s) => s.openDrawer)
 
   function openCallDetail(call: LiveCall) {
@@ -33,32 +54,47 @@ export function Dashboard() {
         ? 'bg-amber/15 text-amber'
         : 'bg-info/15 text-info'
 
+  const topIntent = mostFrequentIntent([...mockCallLog, ...mockLiveCalls])
+
+  // Real breakdowns behind the two percent KPIs — not a single hue-on-itself
+  // ring, an actual distribution of the call-log/simulation records.
+  const outcomeCounts = new Map<CallOutcome, number>()
+  for (const entry of mockCallLog) {
+    outcomeCounts.set(entry.outcome, (outcomeCounts.get(entry.outcome) ?? 0) + 1)
+  }
+  const resolvedBreakdown: DonutSegment[] = Array.from(outcomeCounts.entries()).map(
+    ([outcome, value]) => ({
+      label: OUTCOME_LABEL[outcome],
+      value,
+      colorClassName: OUTCOME_COLOR[outcome],
+    }),
+  )
+  const matchedBreakdown: DonutSegment[] = [
+    { label: 'Beat human', value: mockSimulationRun.beat, colorClassName: 'text-pulse' },
+    { label: 'Matched human', value: mockSimulationRun.matched, colorClassName: 'text-sage' },
+    { label: 'Worse than human', value: mockSimulationRun.worse, colorClassName: 'text-amber' },
+  ]
+  const BREAKDOWNS: Record<string, DonutSegment[]> = {
+    'resolved-no-redirect': resolvedBreakdown,
+    'matched-human': matchedBreakdown,
+  }
+  const STAT_TARGET: Record<string, () => void> = {
+    'calls-answered': () => onNavigate('call-log'),
+    'resolved-no-redirect': () => onNavigate('call-log', { outcome: 'resolved' }),
+    'matched-human': () => onNavigate('simulation'),
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <section>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           {mockStats.map((stat) => (
-            <StatCard key={stat.id} stat={stat} />
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-body">Live activity</h2>
-          <span className="flex items-center gap-1.5 text-xs font-medium text-pulse">
-            <span className="relative flex h-1.5 w-1.5">
-              {mockLiveCalls.length > 0 && (
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pulse opacity-60" />
-              )}
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-pulse" />
-            </span>
-            {mockLiveCalls.length} in progress
-          </span>
-        </div>
-        <div className="flex gap-3 overflow-x-auto pb-1">
-          {mockLiveCalls.map((call) => (
-            <LiveCallCard key={call.id} call={call} onOpen={openCallDetail} />
+            <StatCard
+              key={stat.id}
+              stat={stat}
+              breakdown={BREAKDOWNS[stat.id]}
+              onOpen={STAT_TARGET[stat.id]}
+            />
           ))}
         </div>
       </section>
@@ -72,48 +108,61 @@ export function Dashboard() {
             </span>
           )}
         </h2>
-        <AttentionList items={mockAttentionItems} />
+        <AttentionList items={mockAttentionItems} onNavigate={onNavigate} />
+      </section>
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-body">
+            Live calls
+            {mockLiveCalls.length > 0 && (
+              <span className="rounded-full bg-pulse/10 px-1.5 py-0.5 text-[11px] font-semibold text-pulse">
+                {mockLiveCalls.length}
+              </span>
+            )}
+          </h2>
+          <button
+            type="button"
+            onClick={() => onNavigate('live-calls')}
+            className="flex items-center gap-0.5 text-xs font-medium text-muted transition-colors hover:text-pulse"
+          >
+            View all
+            <ChevronRightIcon className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <ul className="card flex flex-col divide-y divide-hairline py-1">
+          {mockLiveCalls.map((call) => (
+            <CompactCallRow key={call.id} call={call} onOpen={openCallDetail} />
+          ))}
+        </ul>
+        {topIntent && (
+          <button
+            type="button"
+            onClick={() => onNavigate('call-log', { search: topIntent })}
+            className="mt-3 text-left text-xs text-faint hover:text-muted"
+          >
+            <span className="font-semibold uppercase tracking-wider text-insight">AI insight</span>
+            {'  ·  '}Most common request this week: {topIntent}
+          </button>
+        )}
       </section>
     </div>
   )
 }
 
-function LiveCallCard({
-  call,
-  onOpen,
-}: {
-  call: LiveCall
-  onOpen: (call: LiveCall) => void
-}) {
-  const elapsed = useElapsedSeconds(call.startedAt)
-
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(call)}
-      className="card-interactive flex w-60 shrink-0 flex-col gap-2.5 p-4 text-left"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-pulse">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pulse opacity-60" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-pulse" />
-          </span>
-          Live
-        </span>
-        <span className="font-mono text-xs text-muted">{formatDuration(elapsed)}</span>
-      </div>
-      <p className="truncate text-sm font-medium text-body">{call.intent}</p>
-      <PulseLine
-        mode="live"
-        height={28}
-        className="text-pulse"
-        aria-label={`Live waveform for ${call.intent}`}
-      />
-      <div className="flex items-center justify-between gap-2">
-        <ConfidenceBadge level={call.confidence} score={call.confidenceScore} />
-      </div>
-      <AiStateIndicator confidence={call.confidence} />
-    </button>
-  )
+function mostFrequentIntent(entries: { intent: string }[]): string | null {
+  if (entries.length === 0) return null
+  const counts = new Map<string, number>()
+  for (const entry of entries) {
+    counts.set(entry.intent, (counts.get(entry.intent) ?? 0) + 1)
+  }
+  let best: string | null = null
+  let bestCount = 0
+  for (const [intent, count] of counts) {
+    if (count > bestCount) {
+      best = intent
+      bestCount = count
+    }
+  }
+  return best
 }

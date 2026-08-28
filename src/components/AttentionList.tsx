@@ -1,4 +1,4 @@
-import type { AttentionItem } from '../types'
+import type { AttentionItem, CallLogSeed } from '../types'
 import { useUiStore } from '../store/ui'
 import { AlertCircleIcon, AlertTriangleIcon } from './icons'
 
@@ -30,8 +30,15 @@ const SEVERITY_CONFIG: Record<
 }
 
 /** The trust-building panel — proudly shows "0 items" when clear, and
- * turns every flagged item into a one-click action rather than a report. */
-export function AttentionList({ items }: { items: AttentionItem[] }) {
+ * turns every flagged item into a one-click drill-down into the exact
+ * records behind it, rather than a report to read and dismiss. */
+export function AttentionList({
+  items,
+  onNavigate,
+}: {
+  items: AttentionItem[]
+  onNavigate: (id: string, filter?: CallLogSeed) => void
+}) {
   const openDrawer = useUiStore((s) => s.openDrawer)
   const closeDrawer = useUiStore((s) => s.closeDrawer)
 
@@ -74,6 +81,14 @@ export function AttentionList({ items }: { items: AttentionItem[] }) {
     })
   }
 
+  function open(item: AttentionItem) {
+    if (item.target) {
+      onNavigate(item.target, item.targetFilter)
+    } else {
+      review(item)
+    }
+  }
+
   return (
     <ul className="flex flex-col gap-2.5">
       {items.map((item) => {
@@ -82,7 +97,8 @@ export function AttentionList({ items }: { items: AttentionItem[] }) {
         return (
           <li
             key={item.id}
-            className={`card flex items-start gap-3.5 border-l-4 ${c.border} px-5 py-4`}
+            onClick={() => open(item)}
+            className={`card flex cursor-pointer items-start gap-3.5 border-l-4 ${c.border} px-5 py-4 transition-colors duration-150 hover:bg-surface-hover`}
           >
             <span
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${c.chipBg} ${c.text}`}
@@ -100,10 +116,13 @@ export function AttentionList({ items }: { items: AttentionItem[] }) {
             </div>
             <button
               type="button"
-              onClick={() => review(item)}
+              onClick={(e) => {
+                e.stopPropagation()
+                open(item)
+              }}
               className="btn-secondary shrink-0 !px-3.5 !py-1.5 text-xs"
             >
-              Review
+              {item.target ? 'View' : 'Review'}
             </button>
           </li>
         )

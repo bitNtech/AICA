@@ -9,7 +9,7 @@ export function DocConflictView({ conflict }: { conflict: DocConflict }) {
   if (resolved) {
     const winner = resolved === 'A' ? conflict.docA : conflict.docB
     return (
-      <div className="flex flex-col gap-3 rounded-2xl border border-sage/30 bg-sage/[0.06] p-4">
+      <div className="flex flex-col gap-3 rounded-2xl border border-sage/30 bg-sage/10 p-4">
         <p className="text-sm font-medium text-body">
           "{winner.title}" will be used going forward.
         </p>

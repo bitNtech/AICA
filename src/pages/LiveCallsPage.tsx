@@ -69,7 +69,7 @@ function CallListRow({
         aria-current={active ? 'true' : undefined}
         className={`flex w-full flex-col gap-1.5 rounded-2xl border p-3.5 text-left shadow-sm transition-colors duration-150 ${
           active
-            ? 'border-pulse/30 bg-pulse/[0.06]'
+            ? 'border-pulse/30 bg-pulse/10'
             : 'border-hairline bg-surface hover:bg-surface-hover'
         }`}
       >
@@ -139,7 +139,7 @@ function LiveCallDetail({ call }: { call: LiveCall }) {
             type="button"
             onClick={() => setTakenOver(true)}
             aria-label="Take over this call — barge in and speak directly to the caller"
-            className="btn-primary !bg-[#dc2626] !text-white !px-4 !py-2.5 hover:!bg-[#c81e1e]"
+            className="btn-primary !bg-critical !text-white !px-4 !py-2.5 hover:!bg-critical/90"
           >
             <LiveCallsIcon className="h-4 w-4" />
             Take over this call

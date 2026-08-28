@@ -8,7 +8,7 @@ export function DiffCard({ before, after }: { before: string; after: string }) {
         </p>
         <p className="mt-2 text-sm leading-relaxed text-body">{before}</p>
       </div>
-      <div className="rounded-2xl border border-sage/30 bg-sage/[0.06] p-4">
+      <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-sage">
           After
         </p>

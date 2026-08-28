@@ -1,38 +1,44 @@
 @import "tailwindcss";
 
-/* Class-based dark mode: toggled via `.dark` on <html> (see src/lib/theme.ts) */
-@custom-variant dark (&:where(.dark, .dark *));
-
 @theme {
-  /* ---- Brand-fixed, non-flipping — the nav rail's "control room" color
-     and its companion light text, same in both themes. ---- */
+  /* ---- Brand-fixed — the small "always dark" chip color used for
+     tooltips, on-accent stepper text, and avatar initials. Not a page
+     surface; a light UI still uses a dark chip for these in isolation. ---- */
   --color-ink-teal: #0e1712;
   --color-mist: #f4f6f2;
 
-  /* ---- Semantic surfaces — layered depth, flip under .dark below.
-     Light defaults here read as calm/clinical warmth; dark is where the
-     real depth ladder lives (canvas < surface < elevated < hover). ---- */
+  /* ---- The nav rail's own surface — a deep tone of the brand sage, not
+     the page's neutral surfaces. Deliberately dark enough for --color-mist
+     text/icons to sit on it at solid AA contrast. ---- */
+  --color-nav: #4f6a59;
+
+  /* ---- Semantic surfaces — a light, layered depth ladder, tuned to the
+     clinic's healthcare palette (sage + warm cream). Cream canvas,
+     pure-white cards for contrast, sage cast marks "this is AICA
+     speaking." ---- */
   --color-canvas: #f3efe3;
   --color-surface: #ffffff;
-  --color-surface-elevated: #f7f2e6;
-  --color-surface-hover: #efe7d5;
-  --color-surface-warm: #e7ddc9;
-  --color-body: #242f29;
-  --color-muted: #6e7568;
-  --color-faint: #97a091;
-  --color-hairline: rgb(36 48 42 / 12%);
+  --color-surface-elevated: #ffffff;
+  --color-surface-hover: #ece6d4;
+  --color-surface-warm: #e9e4d8;
+  --color-body: #232921;
+  --color-muted: #6b7267;
+  --color-faint: #9aa39a;
+  --color-hairline: #d8d6c8;
+  /* A visible "off/empty" track for toggles and sliders — bg-hairline reads
+     as a near-invisible smudge once it's a filled area rather than a 1px
+     rule, so controls get their own, clearly-a-control tone. */
+  --color-track: #c0c3b9;
 
   /* ---- Accent system — every color communicates a specific meaning, used
-     nowhere decoratively. Light-mode values are deepened for text contrast
-     on a bright surface; dark-mode values (below) are the lighter, more
-     luminous versions meant to hold on near-black. ---- */
-  --color-pulse: #0d9488; /* brand / AI-active / primary CTA */
+     nowhere decoratively. ---- */
+  --color-pulse: #769382; /* brand / AI-active / primary CTA */
   --color-sage: #16a34a; /* success / resolved / healthy */
-  --color-signal: #0e7490; /* AI + system activity (secondary accent) */
-  --color-amber: #b45309; /* warning / needs review */
-  --color-critical: #dc2626; /* error / urgent / escalation */
-  --color-info: #2563eb; /* neutral informational */
-  --color-insight: #7c3aed; /* AI intelligence / automation */
+  --color-signal: #4ea8de; /* AI + system activity (secondary accent) */
+  --color-amber: #f4b740; /* warning / needs review */
+  --color-critical: #ef6a78; /* error / urgent / escalation */
+  --color-info: #4ea8de; /* neutral informational */
+  --color-insight: #8b7cf6; /* AI intelligence / automation */
 
   /* ---- Type — Fraunces (display) / Inter (UI) / IBM Plex Mono (data) ---- */
   --font-display: "Fraunces", ui-serif, Georgia, serif;
@@ -63,37 +69,8 @@
   --shadow-lg: 0 20px 40px -12px rgb(15 23 20 / 18%);
 }
 
-.dark {
-  /* Depth ladder — five distinct, deliberately-stepped surfaces. Never the
-     same near-black-green twice. */
-  --color-canvas: #0a0f0d;
-  --color-surface: #131c19;
-  --color-surface-elevated: #1a2521;
-  --color-surface-hover: #22322a;
-  --color-surface-warm: #17251f; /* faint mint cast — "this is AICA speaking" */
-  --color-body: #f2f4ee;
-  --color-muted: #a7b3ac;
-  --color-faint: #6d7b73;
-  --color-hairline: #283730;
-
-  --color-pulse: #34d399;
-  --color-sage: #4ade80;
-  --color-signal: #22d3ee;
-  --color-amber: #fbbf24;
-  --color-critical: #fb7185;
-  --color-info: #60a5fa;
-  --color-insight: #a78bfa;
-
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
-  --shadow-md: 0 8px 20px -6px rgb(0 0 0 / 50%), 0 1px 0 rgb(255 255 255 / 3%) inset;
-  --shadow-lg: 0 24px 48px -16px rgb(0 0 0 / 65%);
-}
-
 html {
   color-scheme: light;
-}
-html.dark {
-  color-scheme: dark;
 }
 
 body {

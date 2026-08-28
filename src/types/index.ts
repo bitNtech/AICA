@@ -49,6 +49,14 @@ export interface StatSeries {
   target?: number
 }
 
+/** Pre-filled Call Log filters — how a dashboard click drills into the
+ * exact rows behind a metric, instead of landing on the unfiltered log. */
+export interface CallLogSeed {
+  outcome?: CallOutcome
+  confidence?: ConfidenceLevel
+  search?: string
+}
+
 export type AttentionSeverity = 'info' | 'warning' | 'critical'
 
 export interface AttentionItem {
@@ -56,7 +64,10 @@ export interface AttentionItem {
   title: string
   detail: string
   severity: AttentionSeverity
-  href?: string
+  /** Nav id to drill into for the detail behind this item (e.g. 'call-log'). */
+  target?: string
+  /** `target: 'call-log'` only — which rows this item is actually about. */
+  targetFilter?: CallLogSeed
 }
 
 export type AgentStatus = 'answering' | 'paused' | 'degraded'

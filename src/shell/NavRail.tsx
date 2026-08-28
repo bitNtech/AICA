@@ -59,7 +59,7 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
   return (
     <nav
       aria-label="Primary"
-      className={`flex h-screen w-[72px] shrink-0 flex-col bg-ink-teal text-mist transition-[width] duration-150 ease-out ${
+      className={`flex h-screen w-[72px] shrink-0 flex-col bg-nav transition-[width] duration-150 ease-out ${
         expanded ? 'lg:w-64' : 'lg:w-[72px]'
       }`}
     >
@@ -67,11 +67,11 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
         <PulseLine
           mode="idle"
           height={20}
-          className="w-8 shrink-0 text-pulse"
+          className="w-8 shrink-0 text-mist"
           aria-label="AICA"
         />
         {expanded && (
-          <span className="hidden truncate font-display text-lg font-normal tracking-tight text-white lg:inline">
+          <span className="hidden truncate font-display text-lg font-normal tracking-tight text-mist lg:inline">
             AICA
           </span>
         )}
@@ -79,7 +79,7 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
           type="button"
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          className="ml-auto hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-mist/40 transition-colors hover:bg-white/[0.06] hover:text-mist lg:flex"
+          className="ml-auto hidden h-7 w-7 shrink-0 items-center justify-center rounded-md text-mist/45 transition-colors hover:bg-white/10 hover:text-mist lg:flex"
         >
           {collapsed ? (
             <ChevronsRightIcon className="h-4 w-4" />
@@ -93,7 +93,7 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
         {GROUPS.map((group) => (
           <div key={group.label}>
             {expanded && (
-              <p className="hidden px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/35 lg:block">
+              <p className="hidden px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/40 lg:block">
                 {group.label}
               </p>
             )}
@@ -118,9 +118,9 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
 
       {expanded && <PulseTicker onOpenLiveCalls={() => onSelect('live-calls')} />}
 
-      <div className="border-t border-white/[0.07] px-2 py-3 lg:px-3">
+      <div className="border-t border-white/10 px-2 py-3 lg:px-3">
         {expanded && (
-          <p className="hidden px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/35 lg:block">
+          <p className="hidden px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/40 lg:block">
             Governance
           </p>
         )}
@@ -164,20 +164,20 @@ function NavRow({
         aria-current={active ? 'page' : undefined}
         className={`group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-150 lg:px-3 ${
           active
-            ? 'bg-pulse/[0.12] text-white'
+            ? 'bg-white/[0.14] text-mist'
             : muted
-              ? 'text-mist/45 hover:bg-white/[0.05] hover:text-mist/75'
-              : 'text-mist/70 hover:bg-white/[0.05] hover:text-white'
+              ? 'text-mist/45 hover:bg-white/10 hover:text-mist/80'
+              : 'text-mist/70 hover:bg-white/10 hover:text-mist'
         }`}
       >
         {active && (
           <span
-            className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-pulse shadow-[0_0_8px_var(--color-pulse)]"
+            className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-mist"
             aria-hidden="true"
           />
         )}
         <Icon
-          className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-pulse' : 'opacity-90'}`}
+          className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-mist' : 'opacity-80'}`}
         />
         {expanded && (
           <span className="hidden truncate font-medium lg:inline">
@@ -185,7 +185,7 @@ function NavRow({
           </span>
         )}
         {expanded && item.badge ? (
-          <span className="ml-auto hidden rounded-full bg-pulse px-1.5 py-0.5 text-[11px] font-semibold leading-none text-ink-teal lg:inline">
+          <span className="ml-auto hidden rounded-full bg-mist px-1.5 py-0.5 text-[11px] font-semibold leading-none text-nav lg:inline">
             {item.badge}
           </span>
         ) : null}
@@ -199,11 +199,11 @@ function PulseTicker({ onOpenLiveCalls }: { onOpenLiveCalls: () => void }) {
   const overflow = mockLiveCalls.length - visible.length
 
   return (
-    <div className="hidden border-t border-white/[0.07] px-3 py-3 lg:block">
+    <div className="hidden border-t border-white/10 px-3 py-3 lg:block">
       <p className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/40">
         <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pulse opacity-60" />
-          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-pulse" />
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-mist opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-mist" />
         </span>
         {mockLiveCalls.length} calls in progress
       </p>
@@ -213,12 +213,12 @@ function PulseTicker({ onOpenLiveCalls }: { onOpenLiveCalls: () => void }) {
             <button
               type="button"
               onClick={onOpenLiveCalls}
-              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-white/[0.05]"
+              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-white/10"
             >
               <PulseLine
                 mode="live"
                 height={16}
-                className="w-8 shrink-0 text-pulse"
+                className="w-8 shrink-0 text-mist"
                 aria-label={`Live call: ${call.intent}`}
               />
               <span className="truncate text-xs text-mist/65">{call.intent}</span>

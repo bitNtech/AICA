@@ -19,13 +19,11 @@ import { NeverSayList } from '../components/NeverSayList'
 import { AgentFlowNodeView, type FlowNodeData } from '../components/AgentFlowNodeView'
 import { AgentNodeDetail } from '../components/AgentNodeDetail'
 import { useUiStore } from '../store/ui'
-import { useTheme } from '../lib/useTheme'
 
 const nodeTypes = { agentNode: AgentFlowNodeView }
 
 export function AgentBuilderPage() {
   const openDrawer = useUiStore((s) => s.openDrawer)
-  const theme = useTheme()
 
   const nodes: Node<FlowNodeData>[] = useMemo(
     () =>
@@ -87,7 +85,7 @@ export function AgentBuilderPage() {
           fitView
           fitViewOptions={{ padding: 0.2 }}
           proOptions={{ hideAttribution: true }}
-          colorMode={theme}
+          colorMode="light"
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-hairline)" />
           <Controls showInteractive={false} />

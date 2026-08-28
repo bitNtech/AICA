@@ -156,18 +156,23 @@ export const mockAttentionItems: AttentionItem[] = [
     title: '1 call redirected — no staff picked up',
     detail: 'Caller •• 7723 was sent to the front desk line and reached voicemail.',
     severity: 'warning',
+    target: 'call-log',
+    targetFilter: { outcome: 'no_answer_redirect' },
   },
   {
     id: 'attn-2',
     title: '2 calls flagged for review',
     detail: 'Low-confidence responses on insurance eligibility questions.',
     severity: 'warning',
+    target: 'call-log',
+    targetFilter: { confidence: 'review' },
   },
   {
     id: 'attn-3',
     title: 'Knowledge Base: 1 conflicting document',
     detail: '"2026 Holiday Hours" contradicts "Front Desk Hours — Updated."',
     severity: 'critical',
+    target: 'knowledge-base',
   },
 ]
 

@@ -65,7 +65,7 @@ export function UploadPanel() {
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         className={`flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors duration-150 ${
-          dragOver ? 'border-pulse bg-pulse/[0.06]' : 'border-hairline bg-canvas'
+          dragOver ? 'border-pulse bg-pulse/10' : 'border-hairline bg-canvas'
         }`}
       >
         <p className="text-sm font-medium text-body">

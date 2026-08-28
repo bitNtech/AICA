@@ -31,7 +31,7 @@ export function RolloutPage() {
             type="button"
             onClick={rollback}
             disabled={stageIndex === 0}
-            className="btn-secondary shrink-0 !border-critical/35 !text-critical hover:!bg-critical/[0.08]"
+            className="btn-secondary shrink-0 !border-critical/35 !text-critical hover:!bg-critical/10"
           >
             <RolloutIcon className="h-4 w-4 rotate-180" />
             Roll back to 0%
@@ -109,7 +109,7 @@ export function RolloutPage() {
                   setThresholds(next)
                 }}
                 disabled={t.floor === 1}
-                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-hairline accent-pulse disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-track accent-pulse disabled:cursor-not-allowed disabled:opacity-50"
               />
               <span className="w-12 shrink-0 text-right font-mono text-sm text-muted">
                 {Math.round(t.floor * 100)}%

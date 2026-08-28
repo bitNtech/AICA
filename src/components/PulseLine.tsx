@@ -191,7 +191,6 @@ function LivePath({
       strokeLinecap="round"
       strokeLinejoin="round"
       mask={`url(#${maskId})`}
-      className="drop-shadow-[0_0_5px_currentColor]"
       opacity={0.9}
     />
   )

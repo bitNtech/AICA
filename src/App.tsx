@@ -14,20 +14,36 @@ import { CompliancePage } from './pages/CompliancePage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { footerNav, primaryNav } from './data/mock'
+import type { CallLogSeed } from './types'
 
 function App() {
   const [activeNavId, setActiveNavId] = useState('dashboard')
+  const [callLogSeed, setCallLogSeed] = useState<CallLogSeed | undefined>()
   const activeLabel =
     [...primaryNav, ...footerNav].find((n) => n.id === activeNavId)?.label ??
     'Dashboard'
+
+  // The one navigation entry point — used by the sidebar (plain id) and by
+  // dashboard drill-downs (id + which Call Log rows to land on). Routing
+  // anywhere but Call Log always clears a stale seed from an earlier click.
+  function navigate(id: string, seed?: CallLogSeed) {
+    setActiveNavId(id)
+    setCallLogSeed(id === 'call-log' ? seed : undefined)
+  }
 
   return (
     <AppShell
       title={activeLabel}
       activeNavId={activeNavId}
-      onNavSelect={setActiveNavId}
+      onNavSelect={navigate}
     >
-      <Page id={activeNavId} label={activeLabel} onBack={() => setActiveNavId('dashboard')} />
+      <Page
+        id={activeNavId}
+        label={activeLabel}
+        onBack={() => navigate('dashboard')}
+        onNavigate={navigate}
+        callLogSeed={callLogSeed}
+      />
     </AppShell>
   )
 }
@@ -36,18 +52,28 @@ function Page({
   id,
   label,
   onBack,
+  onNavigate,
+  callLogSeed,
 }: {
   id: string
   label: string
   onBack: () => void
+  onNavigate: (id: string, seed?: CallLogSeed) => void
+  callLogSeed?: CallLogSeed
 }) {
   switch (id) {
     case 'dashboard':
-      return <Dashboard />
+      return <Dashboard onNavigate={onNavigate} />
     case 'live-calls':
       return <LiveCallsPage />
     case 'call-log':
-      return <CallLogPage />
+      return (
+        <CallLogPage
+          initialSearch={callLogSeed?.search}
+          initialOutcomeFilter={callLogSeed?.outcome}
+          initialConfidenceFilter={callLogSeed?.confidence}
+        />
+      )
     case 'knowledge-base':
       return <KnowledgeBasePage />
     case 'agent-builder':
