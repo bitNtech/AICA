@@ -1,9 +1,9 @@
 # AICA — Local Setup Guide
 
-This covers running the **AICA frontend** (this repo) against a real **AICA-backend**
-locally, so you can test the voice agent end-to-end via *Simulation & Testing → Run
-simulation*. It assumes `AICA/` and `AICA-backend/` are checked out as sibling
-directories (the layout this guide and `setup.sh` both assume).
+This covers running the **AICA frontend** against a real **AICA backend** locally, so
+you can test the voice agent end-to-end via *Simulation & Testing → Run simulation*.
+Both live in this one repo — the frontend at the repo root, the backend under
+[backend/](backend/).
 
 ## Architecture, in one line
 
@@ -24,19 +24,19 @@ cd AICA
 ./setup.sh
 ```
 
-On any machine with `AICA` and `AICA-backend` checked out side by side, this detects
-your OS and GPU, sizes a local LLM to fit it, installs everything it safely can
-(frontend deps, backend venv + Python deps, the AI4Bharat NeMo fork, Ollama itself if
-missing), pulls the sized model, and **launches both services** — it ends with the
-frontend and backend already running and a URL to open. Ctrl+C stops both.
+On any machine with this repo checked out, this detects your OS and GPU, sizes a local
+LLM to fit it, installs everything it safely can (frontend deps, backend venv + Python
+deps, the AI4Bharat NeMo fork, Ollama itself if missing), pulls the sized model, and
+**launches both services** — it ends with the frontend and backend already running and
+a URL to open. Ctrl+C stops both.
 
 The only thing it can't fully automate is the Hugging Face token for the gated ASR
 model (it's tied to your personal HF account) — it'll pause and ask you to paste one
 in in the moment, with the exact link to get it.
 
-Run `./setup.sh --help` for every environment-variable override (custom ports, a
-different backend checkout path, pinning a specific LLM tag instead of auto-sizing,
-`SETUP_SKIP_RUN=1` to install without launching).
+Run `./setup.sh --help` for every environment-variable override (custom ports, pinning a
+specific LLM tag instead of auto-sizing, `SETUP_SKIP_RUN=1` to install without
+launching).
 
 If you'd rather do it by hand, or want to understand what the script does, read on.
 
@@ -51,28 +51,27 @@ present, it prints what to do manually and keeps going rather than aborting.
   separately; torch's MPS backend picks it up with no extra driver step). This decides
   which LLM size it pulls — see the sizing table in §3 (Component recommendations)
   below.
-- **Frontend** — `npm install`, creates `AICA/.env` from `.env.example` if missing.
+- **Frontend** — `npm install`, creates `.env` from `.env.example` if missing.
 - **Python 3.10/3.11** — required because the AI4Bharat NeMo build has no wheels above
   3.11. Tries `winget` (Windows), `apt-get`/`dnf`/`pacman` (Linux), or `brew` (macOS)
   if no supported interpreter is already on `PATH`.
-- **Backend environment** — creates `AICA-backend/.venv`, installs
-  `requirements.txt`, clones and installs the AI4Bharat NeMo fork
+- **Backend environment** — creates `.venv`, installs `requirements.txt`, clones and
+  installs the AI4Bharat NeMo fork
   (`git clone --depth 1 https://github.com/AI4Bharat/NeMo.git NeMo_ai4bharat` +
   `pip install -e ./NeMo_ai4bharat --no-deps` — stock `nemo-toolkit` can't load
   IndicConformer's multilingual tokenizer). Reports whether `torch.cuda.is_available()`
   came back true afterward.
 - **Ollama** — installs it if missing (official install script on Linux, `brew` on
   macOS, `winget` on Windows), starts `ollama serve` if it isn't already listening on
-  `:11434`, then pulls the GPU-sized model tag and writes it into
-  `AICA-backend/.env`'s `LLM_MODEL`.
+  `:11434`, then pulls the GPU-sized model tag and writes it into `.env`'s `LLM_MODEL`.
 - **Launch** — starts the backend (`uvicorn backend.main:app`) and frontend
-  (`vite --host`), logs to `AICA-backend/backend.log` / `AICA/frontend.log`, and waits.
+  (`vite --host`), logs to `backend.log` / `frontend.log`, and waits.
 
 **What genuinely can't be scripted:** a Hugging Face token for the gated ASR model
 (`ai4bharat/indicconformer_stt_ta_hybrid_ctc_rnnt_large`). It's tied to your personal
 HF account and a license you have to accept yourself, so the script pauses and prompts
 for it interactively — paste it in when asked, or press Enter to skip and add
-`HF_TOKEN=hf_your_token_here` to `AICA-backend/.env` yourself later:
+`HF_TOKEN=hf_your_token_here` to `.env` yourself later:
 1. Visit the [model page](https://huggingface.co/ai4bharat/indicconformer_stt_ta_hybrid_ctc_rnnt_large)
    and accept its license.
 2. Create a **read** token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
@@ -81,18 +80,17 @@ for it interactively — paste it in when asked, or press Enter to skip and add
 
 ```bash
 cd AICA && npm install && cp .env.example .env
-cd ../AICA-backend
 py -3.11 -m venv .venv && .venv/Scripts/Activate.ps1   # or py -3.10; source .venv/bin/activate on Linux/macOS
 pip install -r requirements.txt
 git clone --depth 1 https://github.com/AI4Bharat/NeMo.git NeMo_ai4bharat
 pip install -e ./NeMo_ai4bharat --no-deps
 # add HF_TOKEN=hf_... to .env (see step above)
 # install Ollama, then: ollama pull qwen2.5:7b   (or 3b/14b/32b — see sizing table below)
-bash run.sh                          # starts the backend on :8000
+uvicorn backend.main:app --reload    # starts the backend on :8000
 ```
 
 ```bash
-cd AICA && npm run dev               # starts the frontend on :5173
+npm run dev                          # starts the frontend on :5173
 ```
 
 Open the frontend URL, go to **Simulation & Testing → Run simulation**.
@@ -123,7 +121,7 @@ have):
 
 | Hardware | Model tag | Notes |
 |---|---|---|
-| CPU-only / <6GB VRAM | `qwen2.5:3b` | Already `AICA-backend/.env`'s default. Fast, but weaker Tamil fluency and less reliable tool-calling discipline across the 22 tools — expect more failed golden flows. |
+| CPU-only / <6GB VRAM | `qwen2.5:3b` | Already `.env`'s default. Fast, but weaker Tamil fluency and less reliable tool-calling discipline across the 22 tools — expect more failed golden flows. |
 | 6–8GB VRAM | **`qwen2.5:7b`** (recommended default) | Best balance for this domain at MVP scale — `setup.sh` pulls this by default. |
 | 12GB+ VRAM | `qwen2.5:14b` | Noticeably better instruction-following on the harder flows (emergency escalation, multi-step booking); higher per-turn latency. |
 | 24GB+ VRAM / cloud | `qwen2.5:32b`, or move to vLLM/TGI for a served 7B–14B | Only worth it once you have concurrent calls to serve — `BACKEND_COMPLETION.md` §3.5 already flags Ollama/single-process as a later scaling limit, not an MVP one. |
@@ -131,7 +129,6 @@ have):
 **Don't just trust this table — validate it against your own prompt and flows:**
 
 ```bash
-cd AICA-backend
 python -m backend.scripts.golden_eval
 ```
 
@@ -185,7 +182,7 @@ for the MVP.
   `ready` event → check `HF_TOKEN`, that the NeMo fork installed cleanly, and the
   backend's startup logs for an ASR load error.
 - **Nothing replies to voice or typed text** → `conversation_ready`/LLM unreachable →
-  confirm Ollama is running (`ollama list`) and that `AICA-backend/.env`'s
+  confirm Ollama is running (`ollama list`) and that `.env`'s
   `LLM_BASE_URL`/`LLM_MODEL` match what you actually pulled.
 - **Panel stuck on "Disconnected — Retry"** → the backend isn't running on the port
-  `AICA/.env`'s `VITE_BACKEND_WS_URL` points at (default `ws://localhost:8000`).
+  `.env`'s `VITE_BACKEND_WS_URL` points at (default `ws://localhost:8000`).

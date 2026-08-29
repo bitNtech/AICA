@@ -1,6 +1,6 @@
 /**
  * The message contract for a manual test call over the backend's real
- * `/ws/audio` endpoint (see AICA-backend/backend/main.py — that file is the
+ * `/ws/audio` endpoint (see backend/main.py — that file is the
  * source of truth, not a separate spec doc). Kept as a small discriminated
  * union on both sides so a new backend capability is additive here, not a
  * rewrite of the panel's state machine.

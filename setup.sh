@@ -1,22 +1,21 @@
 #!/usr/bin/env bash
 #
-# AICA one-shot local setup + run. Point this at a machine with AICA and
-# AICA-backend checked out as sibling directories, run it, and it installs
-# everything it safely can, auto-sizes the local LLM to whatever GPU it
-# finds, and launches both services. Idempotent — safe to re-run.
+# AICA one-shot local setup + run. Run this from a checkout of this repo and
+# it installs everything it safely can, auto-sizes the local LLM to whatever
+# GPU it finds, and launches both services. Idempotent — safe to re-run.
 #
 # What it does:
 #   1. Detects OS + GPU (NVIDIA VRAM via nvidia-smi, or Apple Silicon).
 #   2. Frontend: npm install, creates AICA/.env from .env.example if missing.
 #   3. Backend: finds/best-effort-installs Python 3.10/3.11, creates a venv,
 #      installs requirements.txt, clones + installs the AI4Bharat NeMo fork.
-#   4. Prompts for a Hugging Face token if AICA-backend/.env doesn't have one
-#      (needed for the gated ASR model) — this is the one step that
-#      genuinely cannot be automated, since it's tied to your personal HF
-#      account and its license acceptance.
+#   4. Prompts for a Hugging Face token if .env doesn't have one (needed for
+#      the gated ASR model) — this is the one step that genuinely cannot be
+#      automated, since it's tied to your personal HF account and its
+#      license acceptance.
 #   5. Best-effort installs Ollama if missing, starts it if not running,
-#      pulls an LLM sized to the GPU detected in step 1, updates
-#      AICA-backend/.env to match.
+#      pulls an LLM sized to the GPU detected in step 1, updates .env to
+#      match.
 #   6. Starts the backend (uvicorn) and frontend (vite) and waits — Ctrl+C
 #      stops both cleanly. Skip this with SETUP_SKIP_RUN=1.
 #
@@ -26,7 +25,6 @@
 #
 # Usage:
 #   ./setup.sh                                    # detect + install + run
-#   AICA_BACKEND_DIR=../my-backend-checkout ./setup.sh
 #   LLM_MODEL_TAG=qwen2.5:14b ./setup.sh           # skip GPU-based auto-sizing
 #   BACKEND_PORT=8001 FRONTEND_PORT=5174 ./setup.sh
 #   SETUP_SKIP_RUN=1 ./setup.sh                    # install only, don't launch
@@ -34,13 +32,12 @@
 set -Eeuo pipefail
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
 FRONTEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_REL="${AICA_BACKEND_DIR:-../AICA-backend}"
-BACKEND_DIR="$(cd "$FRONTEND_DIR/$BACKEND_REL" 2>/dev/null && pwd || true)"
+BACKEND_DIR="$FRONTEND_DIR"
 LLM_MODEL_TAG_OVERRIDE="${LLM_MODEL_TAG:-}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
@@ -48,12 +45,6 @@ SKIP_RUN="${SETUP_SKIP_RUN:-0}"
 
 log()  { echo "[setup] $*"; }
 warn() { echo "[setup] WARNING: $*" >&2; }
-
-if [[ -z "$BACKEND_DIR" ]]; then
-  echo "ERROR: could not find the backend checkout at '$BACKEND_REL' (relative to this script)." >&2
-  echo "Clone AICA-backend alongside this repo, or set AICA_BACKEND_DIR to its path, then re-run." >&2
-  exit 1
-fi
 
 detect_os() {
   case "$(uname -s)" in
@@ -66,9 +57,8 @@ detect_os() {
 OS="$(detect_os)"
 
 echo "=== AICA setup ==="
-log "OS:       $OS"
-log "Frontend: $FRONTEND_DIR"
-log "Backend:  $BACKEND_DIR"
+log "OS:   $OS"
+log "Repo: $FRONTEND_DIR (frontend at repo root, backend package at backend/)"
 echo
 
 # ---------------------------------------------------------------------------
@@ -269,7 +259,7 @@ The ASR model (ai4bharat/indicconformer_stt_ta_hybrid_ctc_rnnt_large) is gated:
   2. Create a read token at https://huggingface.co/settings/tokens
 EOF
   if [[ -t 0 ]]; then
-    read -rsp "Paste that token here (or press Enter to skip and add it to AICA-backend/.env later): " HF_TOKEN_INPUT
+    read -rsp "Paste that token here (or press Enter to skip and add it to .env later): " HF_TOKEN_INPUT
     echo
     if [[ -n "$HF_TOKEN_INPUT" ]]; then
       printf 'HF_TOKEN=%s\n' "$HF_TOKEN_INPUT" >> "$BACKEND_DIR/.env"
@@ -338,7 +328,7 @@ if command -v ollama >/dev/null 2>&1; then
     fi
     grep -q '^LLM_BASE_URL=' "$BACKEND_DIR/.env" || printf 'LLM_BASE_URL=http://localhost:11434/v1\n' >> "$BACKEND_DIR/.env"
     grep -q '^LLM_API_KEY=' "$BACKEND_DIR/.env" || printf 'LLM_API_KEY=ollama\n' >> "$BACKEND_DIR/.env"
-    log "AICA-backend/.env's LLM_MODEL is now $LLM_MODEL_TAG."
+    log ".env's LLM_MODEL is now $LLM_MODEL_TAG."
   else
     warn "Ollama still isn't responding on :11434 — start it manually (\`ollama serve\`) and re-run."
   fi
@@ -346,7 +336,7 @@ else
   cat <<EOF
 Ollama still isn't installed. Install it from https://ollama.com/download, then run:
     ollama pull $LLM_MODEL_TAG
-and make sure AICA-backend/.env has:
+and make sure .env has:
     LLM_BASE_URL=http://localhost:11434/v1
     LLM_MODEL=$LLM_MODEL_TAG
     LLM_API_KEY=ollama

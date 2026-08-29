@@ -7,7 +7,7 @@ export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'closed' | '
 interface UseTestCallSocketOptions {
   url: string | undefined
   /** Optional shared-secret token, sent as `?token=` on the handshake — see
-   * `AICA-backend/backend/settings.py`'s `SecuritySettings.ws_auth_token`.
+   * `backend/settings.py`'s `SecuritySettings.ws_auth_token`.
    * A WS client can't set a custom header, so the token travels as a query
    * param. Leave unset when the backend has no `AUDIO_WS_AUTH_TOKEN`. */
   token?: string
