@@ -49,7 +49,64 @@ page for exercising `/ws/audio` directly without the React dashboard.
 
 ## Component recommendations
 
-### LLM — Qwen2.5-Instruct, not Llama 3.1
+### The prompt is assembled per turn — do not send `main_prompt.txt` whole
+
+`golden/main_prompt.txt` is a ~15k-token **specification**, not a runtime prompt.
+Sending it whole as the system message produced two separately-reproduced failures:
+
+| num_ctx | What happened |
+|---|---|
+| Ollama default (2048–4096) | Prompt silently truncated **before** section 2's language rules. Agent replied in fluent English and called `lookupPatient` with an invented mobile number while the real one sat in the ledger. |
+| 32768 | Truncation fixed, but the KV cache is far too large for CPU/small-GPU — a *trivial* generation measured **222 s**, and the reply came back as Tamil script with no coherent meaning. |
+
+So `backend/prompt_builder.py` assembles the prompt instead:
+
+```
+golden/runtime_core.txt        rules that apply to EVERY turn
+  + ONE flow playbook          parsed out of main_prompt.txt section 8
+  + that flow's exemplars      golden/flow_exemplars.json
+  = ~2.5-3k tokens             (vs ~15k)
+```
+
+A deterministic keyword router (`detect_intent`) picks the flow with no extra LLM
+round-trip — a voice turn cannot afford one. The intent is **sticky** per call, so a
+follow-up turn that matches no trigger ("ஆமாம்", a phone number) does not drop the
+playbook mid-flow. `main_prompt.txt` remains the single source of truth for the 20
+playbooks; they are parsed from it, never duplicated.
+
+**Always set `num_ctx` explicitly** in a Modelfile (see the repo-root `Modelfile`,
+which pins 8192). Ollama's default is VRAM-derived and will silently truncate.
+
+Verify register — Tamil/English ratio, wrong-script leakage, unspeakable symbols,
+turn length, questions per turn, fabricated identifiers — on scenarios that appear
+nowhere in `golden/`:
+
+```bash
+python -m backend.scripts.register_eval
+```
+
+This is a **floor**: clean means nothing is mechanically wrong, not that the Tamil
+reads naturally. A native reader still has to read the transcript.
+
+### LLM — Qwen3-4B-Instruct-2507
+
+`qwen2.5:3b` does not clear the bar for this prompt even with the context bug fixed —
+un-truncated, it produces Tamil script with no coherent meaning. That is a capacity
+ceiling, not a configuration problem.
+
+**Qwen3-4B-Instruct-2507** (Apache-2.0, non-thinking, 262144-token native context) is
+the verified default. Build it with the pinned context:
+
+```bash
+ollama pull qwen3:4b-instruct-2507-q4_K_M
+ollama create aruvi-base -f Modelfile     # bakes num_ctx 8192
+# then set LLM_MODEL=aruvi-base in .env
+```
+
+> **Latency warning:** on CPU this measures ~3.6 tok/s, i.e. minutes per turn — fine
+> for evals, unusable for a live voice call. GPU offload is required for real use.
+
+### Older sizing notes — Qwen2.5-Instruct, not Llama 3.1
 
 `backend/settings.py`/`BACKEND_COMPLETION.md` name Llama-3.1-8B-Instruct and
 Qwen2.5-7B-Instruct as the two candidates the backend was designed around (it talks to
