@@ -44,6 +44,7 @@ package lands.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import io
 import logging
@@ -75,6 +76,25 @@ _EDGE_VOICES: dict[str, str] = {
     "gu": "gu-IN-DhwaniNeural",
     "pa": "pa-IN-OjasNeural",
 }
+
+
+def _run_blocking(coro):
+    """Run `coro` to completion from synchronous code, loop or no loop.
+
+    synthesize() is a sync method with an async engine underneath. main.py
+    reaches it through asyncio.to_thread, where the thread has no loop and
+    asyncio.run() is fine - but any caller that is itself async (the transcript
+    logger, a notebook, a future streaming path) would hit "asyncio.run()
+    cannot be called from a running event loop". Handing the coroutine to a
+    private loop on its own thread works in both cases.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 class EdgeTts:
@@ -125,9 +145,7 @@ class EdgeTts:
         if not text:
             return SynthesisResult(np.array([], dtype=np.int16), self._sample_rate)
 
-        # main.py calls this via asyncio.to_thread, so this thread has no
-        # running loop and asyncio.run() is free to make its own.
-        mp3 = asyncio.run(self._stream_mp3(text))
+        mp3 = _run_blocking(self._stream_mp3(text))
         if not mp3:
             logger.warning("edge TTS returned no audio for %r", text[:60])
             return SynthesisResult(np.array([], dtype=np.int16), self._sample_rate)

@@ -104,6 +104,7 @@ if __name__ == "__main__":
 # the decode/mix/scale path is ours and worth testing, the Microsoft endpoint
 # is not, and a unit test must not depend on it being reachable.
 
+import asyncio
 import io
 
 import pytest
@@ -187,3 +188,21 @@ def test_blank_text_never_reaches_the_network(monkeypatch) -> None:
 def test_synthesize_before_load_raises() -> None:
     with pytest.raises(RuntimeError):
         EdgeTts(TtsSettings(engine="edge")).synthesize("வணக்கம்", "ta")
+
+
+def test_synthesize_works_from_inside_a_running_event_loop(monkeypatch) -> None:
+    # synthesize() is sync with an async engine underneath. main.py reaches it
+    # via asyncio.to_thread (no loop in that thread), but an async caller -
+    # scripts/transcript_log.py, a notebook - calls it directly, where a naive
+    # asyncio.run() raises "cannot be called from a running event loop".
+    tts = EdgeTts(TtsSettings(engine="edge", language="ta"))
+    tts.load()
+    _stub_mp3(monkeypatch, tts, np.array([0.25, -0.25], dtype=np.float32), 24_000)
+
+    async def call_from_loop():
+        return tts.synthesize("வணக்கம்", "ta")
+
+    result = asyncio.run(call_from_loop())
+
+    assert result.samples.dtype == np.int16
+    assert result.samples.size == 2
