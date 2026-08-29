@@ -239,6 +239,24 @@ fi
 if ! "$VENV_PYTHON" -c "import nemo.collections.asr" >/dev/null 2>&1; then
   log "Installing the AI4Bharat NeMo fork..."
   "$VENV_PYTHON" -m pip install -e "$BACKEND_DIR/NeMo_ai4bharat" --no-deps
+
+  # --no-deps above skips NeMo's own runtime deps, so install those
+  # separately. NeMo's requirements files list `triton`, which has no
+  # Windows wheel on PyPI and aborts the whole install if left in — filter
+  # it into temp copies rather than editing the upstream fork. NeMo's ASR
+  # code imports and runs fine without triton for CPU/CUDA inference.
+  log "Installing NeMo's runtime dependencies (triton filtered out)..."
+  NEMO_REQ_DIR="$BACKEND_DIR/NeMo_ai4bharat/requirements"
+  TMP_REQ_DIR="$(mktemp -d)"
+  NEMO_REQ_ARGS=()
+  for f in requirements.txt requirements_common.txt requirements_asr.txt; do
+    if [[ -f "$NEMO_REQ_DIR/$f" ]]; then
+      grep -v '^triton\b' "$NEMO_REQ_DIR/$f" > "$TMP_REQ_DIR/$f"
+      NEMO_REQ_ARGS+=("-r" "$TMP_REQ_DIR/$f")
+    fi
+  done
+  "$VENV_PYTHON" -m pip install "${NEMO_REQ_ARGS[@]}" librosa soundfile
+  rm -rf "$TMP_REQ_DIR"
 fi
 echo
 
