@@ -5,6 +5,7 @@ import { SimResultsBar } from '../components/SimResultsBar'
 import { JudgeCalibrationPanel } from '../components/JudgeCalibrationPanel'
 import { SimulationCallCompare } from '../components/SimulationCallCompare'
 import { DirectTestingPanel } from '../components/DirectTestingPanel'
+import { ErrorBoundary } from '../components/ErrorBoundary'
 import { Toggle } from '../components/Toggle'
 import { useUiStore } from '../store/ui'
 import { useAgentConfigStore } from '../store/agentConfig'
@@ -43,7 +44,27 @@ export function SimulationPage() {
   if (testingOpen) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-4">
-        <DirectTestingPanel onClose={() => setTestingOpen(false)} />
+        <ErrorBoundary
+          fallback={(retry) => (
+            <div className="card flex h-full min-h-0 flex-col items-center justify-center gap-3 p-8 text-center">
+              <p className="text-sm font-medium text-body">The test call panel hit an error.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={retry} className="btn-ghost !px-4 !py-1.5 text-xs">
+                  Try again
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTestingOpen(false)}
+                  className="btn-ghost !px-4 !py-1.5 text-xs"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        >
+          <DirectTestingPanel onClose={() => setTestingOpen(false)} />
+        </ErrorBoundary>
       </div>
     )
   }

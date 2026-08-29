@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { mockCallLog } from '../data/mock'
 import { ConfidenceBadge } from '../components/ConfidenceBadge'
 import { CallLogDetailPanel } from '../components/CallLogDetailPanel'
@@ -6,6 +7,7 @@ import { EmptyState } from '../components/EmptyState'
 import { AlertTriangleIcon, CheckIcon, CloseIcon } from '../components/icons'
 import { formatDuration, formatRelativeTime } from '../lib/format'
 import { downloadCsv } from '../lib/exportCsv'
+import { callLogSeedToSearchParams, searchParamsToCallLogSeed } from '../lib/routing'
 import { useUiStore } from '../store/ui'
 import type { CallLogEntry, CallOutcome, ConfidenceLevel } from '../types'
 
@@ -18,24 +20,35 @@ const OUTCOME_STYLE: Record<CallOutcome, string> = {
 
 type SortKey = 'timestamp' | 'durationSec'
 
-export function CallLogPage({
-  initialSearch = '',
-  initialOutcomeFilter = 'all',
-  initialConfidenceFilter = 'all',
-}: {
-  initialSearch?: string
-  initialOutcomeFilter?: 'all' | CallOutcome
-  initialConfidenceFilter?: 'all' | ConfidenceLevel
-}) {
+/** Filters live in the URL (`?q=&outcome=&confidence=`) rather than local
+ * state alone, so a dashboard drill-down survives a refresh and is
+ * shareable/back-navigable — see FRONTEND_IMPROVEMENTS.md §3.1. */
+export function CallLogPage() {
   const openDrawer = useUiStore((s) => s.openDrawer)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const seed = searchParamsToCallLogSeed(searchParams)
   const [entries, setEntries] = useState<CallLogEntry[]>(mockCallLog)
-  const [search, setSearch] = useState(initialSearch)
-  const [outcomeFilter, setOutcomeFilter] = useState<'all' | CallOutcome>(initialOutcomeFilter)
-  const [confidenceFilter, setConfidenceFilter] = useState<'all' | ConfidenceLevel>(
-    initialConfidenceFilter,
-  )
+  const search = seed.search ?? ''
+  const outcomeFilter = seed.outcome ?? 'all'
+  const confidenceFilter = seed.confidence ?? 'all'
   const [sortKey, setSortKey] = useState<SortKey>('timestamp')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  function setSearch(value: string) {
+    setSearchParams(callLogSeedToSearchParams({ ...seed, search: value || undefined }), { replace: true })
+  }
+  function setOutcomeFilter(value: 'all' | CallOutcome) {
+    setSearchParams(
+      callLogSeedToSearchParams({ ...seed, outcome: value === 'all' ? undefined : value }),
+      { replace: true },
+    )
+  }
+  function setConfidenceFilter(value: 'all' | ConfidenceLevel) {
+    setSearchParams(
+      callLogSeedToSearchParams({ ...seed, confidence: value === 'all' ? undefined : value }),
+      { replace: true },
+    )
+  }
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -151,11 +164,7 @@ export function CallLogPage({
           title="No calls match these filters"
           description="Try widening your search or clearing a filter."
           actionLabel="Clear filters"
-          onAction={() => {
-            setSearch('')
-            setOutcomeFilter('all')
-            setConfidenceFilter('all')
-          }}
+          onAction={() => setSearchParams({}, { replace: true })}
         />
       ) : (
         <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-sm">
