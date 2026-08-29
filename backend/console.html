@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ARUVI Voice Console</title>
+<style>
+  :root{
+    --ink:#16191d; --muted:#6b7280; --faint:#9ca3af; --line:#e5e7eb;
+    --page:#f7f8f8; --paper:#fff; --green:#2f6f4f; --green-soft:#eef6f1;
+    --amber:#b4802f; --red:#b04a45; --red-soft:#fdf2f1;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);
+    font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+  .wrap{width:min(100%,1080px);margin:0 auto;padding:24px 20px 40px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  h1{margin:0;font-size:1.35rem;letter-spacing:-.02em}
+  h1 b{color:var(--green)}
+  .sub{color:var(--muted);font-size:.85rem}
+  .pills{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 18px}
+  .pill{display:flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--line);
+    border-radius:99px;background:var(--paper);font-size:.76rem;color:var(--muted)}
+  .pill i{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+  .pill.on i{background:#5a9972} .pill.off i{background:#c9736e}
+  .grid{display:grid;grid-template-columns:1fr 1.25fr;gap:16px;align-items:start}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h2{margin:0 0 12px;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+  button{border:0;border-radius:9px;font:600 .87rem/1 inherit;cursor:pointer;padding:11px 15px;
+    transition:background .15s,opacity .15s}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .primary{background:var(--green);color:#fff}
+  .danger{background:#fff;color:var(--red);border:1px solid #ebcfcc}
+  .ghost{background:#fff;color:#4b5563;border:1px solid var(--line)}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  textarea{width:100%;min-height:78px;padding:11px;border:1px solid var(--line);border-radius:9px;
+    font:inherit;resize:vertical}
+  textarea:focus{outline:2px solid #cfe3d8;outline-offset:-1px}
+  .hint{margin:8px 0 0;color:var(--faint);font-size:.74rem}
+  .samples{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .samples button{text-align:left;padding:9px 11px;background:#fbfbfa;border:1px solid var(--line);
+    color:#374151;font-weight:500;font-size:.82rem;line-height:1.4}
+  .samples button:hover:not(:disabled){background:var(--green-soft);border-color:#cfe3d8}
+  .samples .lbl{display:block;color:var(--faint);font-size:.68rem;letter-spacing:.06em;
+    text-transform:uppercase;margin-bottom:2px}
+  #log{max-height:460px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+  .turn{padding:10px 12px;border-radius:10px;font-size:.88rem;line-height:1.55}
+  .turn.caller{background:#f4f5f6}
+  .turn.agent{background:var(--green-soft)}
+  .turn.sys{background:#fff;border:1px dashed var(--line);color:var(--muted);font-size:.78rem}
+  .turn.err{background:var(--red-soft);color:#8c3a36;font-size:.8rem}
+  .turn .who{display:block;margin-bottom:3px;font-size:.68rem;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--faint)}
+  .turn.agent .who{color:var(--green)}
+  .meta{margin-top:5px;color:var(--faint);font-size:.72rem;font-variant-numeric:tabular-nums}
+  .empty{color:var(--faint);font-size:.85rem;text-align:center;padding:36px 0}
+  .speaking{display:none;align-items:center;gap:7px;margin-top:10px;color:var(--green);font-size:.8rem}
+  .speaking.on{display:flex}
+  .speaking i{width:7px;height:7px;border-radius:50%;background:currentColor;animation:b 1s infinite}
+  @keyframes b{50%{opacity:.25}}
+  .note{margin-top:16px;padding:11px 13px;border:1px solid #f0e2c8;background:#fdf9f1;
+    border-radius:9px;color:#7a5b24;font-size:.76rem;line-height:1.5}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1><b>ARUVI</b> voice console</h1>
+      <div class="sub">Aruvi Multispeciality Hospital &middot; Tamil&ndash;English call agent</div>
+    </div>
+    <div class="row">
+      <button class="primary" id="connect">Start call</button>
+      <button class="danger" id="hangup" disabled>End call</button>
+    </div>
+  </header>
+
+  <div class="pills" id="pills">
+    <span class="pill" id="p-ws"><i></i>socket</span>
+    <span class="pill" id="p-llm"><i></i>conversation</span>
+    <span class="pill" id="p-tts"><i></i>voice</span>
+    <span class="pill" id="p-asr"><i></i>speech-to-text</span>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Speak as the caller</h2>
+        <textarea id="text" placeholder="Type a caller line in Tamil or English&#10;e.g. Cardiology-ல ஒரு appointment book பண்ணணும்." disabled></textarea>
+        <div class="row" style="margin-top:9px">
+          <button class="primary" id="send" disabled>Send turn</button>
+          <button class="ghost" id="mic" disabled>Use microphone</button>
+        </div>
+        <p class="hint" id="michint">Typed turns skip VAD/ASR and drive the same LLM &rarr; TTS path a spoken turn does.</p>
+        <div class="speaking" id="speaking"><i></i><span>agent speaking…</span></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>Sample turns</h2>
+        <div class="samples" id="samples"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Transcript</h2>
+      <div id="log"><div class="empty">Start a call to begin.</div></div>
+      <div class="note" id="privacy">
+        Voice uses Microsoft&rsquo;s neural Tamil voice, which means each reply&rsquo;s
+        <em>text</em> leaves this machine to be synthesised. Fine for the fictional Aruvi
+        test data; not for real patient speech. Swap in a self-hosted engine before that.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Sample turns are lifted from the golden PDF flows so a tester can exercise
+// several intents (and the emergency override) without composing Tamil by hand.
+const SAMPLES = [
+  ["Booking",   "Cardiology-ல ஒரு appointment book பண்ணணும்."],
+  ["Identify",  "பேஷண்ட் நான் தான். என் பேரு முருகேசன், வயசு 58."],
+  ["Number",    "98407 21534."],
+  ["Refill",    "என் அப்பாவுக்கு tablets தீர்ந்துடுச்சு. Refill வேணும்."],
+  ["Report",    "நேத்து test பண்ணேன். Report வந்துடுச்சா?"],
+  ["Billing",   "Discharge bill-ல ஒரு charge ரெண்டு தடவை போட்டு இருக்கீங்க."],
+  ["Info",      "Visiting hours என்ன?"],
+  ["Emergency", "சார், என் அப்பாவுக்கு நெஞ்சு வலி. மூச்சு வாங்குது!"],
+];
+
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+let ws = null, audioCtx = null, playAt = 0, sampleRate = 24000;
+let micStream = null, micNode = null, micOn = false;
+
+function pill(id, on) {
+  const el = $(id);
+  el.classList.toggle("on", !!on);
+  el.classList.toggle("off", on === false);
+}
+
+function add(kind, who, text, meta) {
+  if (logEl.querySelector(".empty")) logEl.innerHTML = "";
+  const d = document.createElement("div");
+  d.className = "turn " + kind;
+  if (who) { const s = document.createElement("span"); s.className = "who"; s.textContent = who; d.appendChild(s); }
+  d.appendChild(document.createTextNode(text));
+  if (meta) { const m = document.createElement("div"); m.className = "meta"; m.textContent = meta; d.appendChild(m); }
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  return d;
+}
+
+// Agent audio arrives as raw int16 PCM frames at the rate announced in
+// agent_speaking_start. Each frame is scheduled after the previous one so
+// clauses play back-to-back instead of overlapping.
+function playPcm(buf) {
+  if (!audioCtx) return;
+  const pcm = new Int16Array(buf);
+  if (!pcm.length) return;
+  const f32 = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) f32[i] = pcm[i] / 32768;
+  const ab = audioCtx.createBuffer(1, f32.length, sampleRate);
+  ab.copyToChannel(f32, 0);
+  const src = audioCtx.createBufferSource();
+  src.buffer = ab;
+  src.connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+  if (playAt < now) playAt = now;
+  src.start(playAt);
+  playAt += ab.duration;
+}
+
+function setLive(live) {
+  $("connect").disabled = live;
+  $("hangup").disabled = !live;
+  $("text").disabled = !live;
+  $("send").disabled = !live;
+  $("mic").disabled = !live;
+  document.querySelectorAll("#samples button").forEach(b => b.disabled = !live);
+}
+
+function connect() {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume();
+  playAt = 0;
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws/audio`);
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = () => {
+    pill("p-ws", true);
+    // All four fields are required by main.py's _validate_start_event; the
+    // mic capture below is configured to match this exact format.
+    ws.send(JSON.stringify({
+      type: "call_started", audio_format: "pcm_s16le",
+      sample_rate: 16000, channels: 1, language: "ta",
+    }));
+    setLive(true);
+  };
+
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== "string") { playPcm(ev.data); return; }
+    const m = JSON.parse(ev.data);
+    switch (m.type) {
+      case "ready":
+        pill("p-llm", m.conversation_ready);
+        pill("p-tts", m.tts_ready);
+        pill("p-asr", m.asr_ready);
+        if (!m.tts_ready) add("err", "voice", "TTS is not loaded — replies will be text only.");
+        if (!m.asr_ready) $("michint").textContent =
+          "Speech-to-text is not loaded, so the microphone is unavailable. Typed turns work and drive the same LLM → TTS path.";
+        $("mic").disabled = !m.asr_ready;
+        break;
+      case "agent_speaking_start":
+        if (m.sample_rate) sampleRate = m.sample_rate;
+        $("speaking").classList.add("on");
+        break;
+      case "agent_clause":   add("agent", "Agent", m.text); break;
+      case "agent_speaking_end":  $("speaking").classList.remove("on"); break;
+      case "agent_interrupted":
+        $("speaking").classList.remove("on");
+        add("sys", null, "agent interrupted by caller"); break;
+      case "transcript":
+        if (m.text) add("caller", "Caller (spoken)", m.text, `${m.duration_ms} ms · ${m.endpoint_reason}`);
+        break;
+      case "partial_transcript": break;
+      case "vad_start": break;
+      case "agent_error":
+      case "asr_error":
+      case "pipeline_error":
+      case "protocol_error":
+        add("err", m.type.replace("_", " "), m.message || ""); break;
+    }
+  };
+
+  ws.onclose = () => {
+    pill("p-ws", false); $("speaking").classList.remove("on");
+    setLive(false); stopMic(); add("sys", null, "call ended");
+  };
+  ws.onerror = () => add("err", "socket", "connection failed — is the backend running?");
+}
+
+function send(text) {
+  if (!ws || ws.readyState !== 1) return;
+  const t = text.trim();
+  if (!t) return;
+  add("caller", "Caller", t);
+  ws.send(JSON.stringify({ type: "user_text", text: t }));
+  $("text").value = "";
+}
+
+async function startMic() {
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+  });
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  const src = ctx.createMediaStreamSource(micStream);
+  // ScriptProcessor is deprecated but needs no separate worklet file, which
+  // keeps this console a single self-contained page.
+  micNode = ctx.createScriptProcessor(4096, 1, 1);
+  micNode.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== 1) return;
+    const f = e.inputBuffer.getChannelData(0);
+    const pcm = new Int16Array(f.length);
+    for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-1, Math.min(1, f[i])) * 32767;
+    ws.send(pcm.buffer);
+  };
+  src.connect(micNode); micNode.connect(ctx.destination);
+  micOn = true; $("mic").textContent = "Stop microphone";
+  add("sys", null, "microphone live — speak Tamil");
+}
+
+function stopMic() {
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (micNode) micNode.disconnect();
+  micStream = micNode = null; micOn = false;
+  $("mic").textContent = "Use microphone";
+}
+
+SAMPLES.forEach(([label, text]) => {
+  const b = document.createElement("button");
+  b.disabled = true;
+  b.innerHTML = `<span class="lbl"></span>`;
+  b.querySelector(".lbl").textContent = label;
+  b.appendChild(document.createTextNode(text));
+  b.onclick = () => send(text);
+  $("samples").appendChild(b);
+});
+
+$("connect").onclick = connect;
+$("hangup").onclick = () => {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "call_ended" }));
+  if (ws) ws.close();
+};
+$("send").onclick = () => send($("text").value);
+$("text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send($("text").value); }
+});
+$("mic").onclick = () => micOn ? stopMic() : startMic().catch(e => add("err", "microphone", String(e)));
+setLive(false);
+</script>
+</body>
+</html>

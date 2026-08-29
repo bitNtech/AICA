@@ -302,7 +302,9 @@ def enrich(flow: dict) -> dict:
     patient_match = _OUTBOUND_PATIENT_RE.search(greeting_roman)
     flow["known_patient_name"] = patient_match.group(1) if patient_match else ""
 
-    flow["known_mrn"] = _MRN_RE.search(greeting["tamil"]).group(0) if greeting and _MRN_RE.search(greeting["tamil"]) else ""
+    greeting_mrn = _MRN_RE.search(greeting["tamil"]) if greeting else None
+    flow["known_mrn"] = greeting_mrn.group(0) if greeting_mrn else ""
+
     flow["mrns"] = list(dict.fromkeys(_MRN_RE.findall(" ".join(t["tamil"] for t in flow["turns"]))))
     return flow
 

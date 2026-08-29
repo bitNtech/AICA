@@ -6,3 +6,4 @@ val.jsonl
 aruvi-lora/
 aruvi-merged/
 *.gguf
+__pycache__/

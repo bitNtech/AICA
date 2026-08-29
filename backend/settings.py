@@ -148,6 +148,15 @@ class TtsSettings:
     surface doesn't change once it is.
     """
 
+    # "edge" is the working default (Microsoft neural voices, no API key, CPU);
+    # "svara" selects the placeholder adapter whose load() still raises. See
+    # backend/tts.py's docstring for the privacy constraint on "edge".
+    engine: str = os.getenv("TTS_ENGINE", "edge")
+
+    # Blank means "pick the female voice mapped for `language`" - see
+    # tts._EDGE_VOICES. Set this to override (e.g. ta-IN-ValluvarNeural, male).
+    voice: str = os.getenv("TTS_VOICE", "")
+
     model: str = os.getenv("TTS_MODEL", "svara-tts")
     voice_reference_path: str = os.getenv("TTS_VOICE_REFERENCE_PATH", "")
     language: str = os.getenv("TTS_LANGUAGE", "ta")
@@ -162,6 +171,8 @@ class TtsSettings:
             raise ValueError(f"Unsupported TTS_LANGUAGE: {self.language}")
         if self.max_concurrency <= 0:
             raise ValueError("TTS_MAX_CONCURRENCY must be positive")
+        if self.engine not in {"edge", "svara"}:
+            raise ValueError("TTS_ENGINE must be either 'edge' or 'svara'")
 
 
 @dataclass(frozen=True)

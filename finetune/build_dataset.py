@@ -56,6 +56,13 @@ def load_flows(path: Path) -> list[dict]:
 
 
 def build_prompt_builder() -> PromptBuilder:
+    # exemplars_path is deliberately not passed. golden/flow_exemplars.json is
+    # the prompt-side substitute for the register this fine-tune installs in the
+    # weights, and the post-fine-tune runtime switches it off with a blank
+    # CONVERSATION_EXEMPLARS_PATH - so training with it in the prompt would
+    # train against a prompt that will not be served. It would also put each
+    # flow's own exchanges into that flow's system message, teaching the model
+    # to copy from context rather than to speak this way.
     builder = PromptBuilder(
         REPO_ROOT / "golden" / "runtime_core.txt", REPO_ROOT / "golden" / "main_prompt.txt"
     )

@@ -6,10 +6,12 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import json
 import logging
+from pathlib import Path
 from uuid import uuid4
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
 from .asr import IndicConformerAsr
 from .barge_in import ActiveSpeech
@@ -27,7 +29,7 @@ from .settings import (
     TtsSettings,
 )
 from .telephony import router as telephony_router
-from .tts import SvaraTts
+from .tts import SvaraTts, create_tts
 from .vad import TenVadSegmenter, VadUpdate
 
 logging.basicConfig(level=logging.INFO)
@@ -47,7 +49,7 @@ async def lifespan(app: FastAPI):
     asr = IndicConformerAsr(settings)
     conversation = ConversationManager(ConversationSettings())
     llm = LlmClient(LlmSettings())
-    tts = SvaraTts(tts_settings)
+    tts = create_tts(tts_settings)
     call_store = CallEventStore(PersistenceSettings())
 
     try:
@@ -67,11 +69,13 @@ async def lifespan(app: FastAPI):
         logger.exception("LLM client failed to configure")
 
     try:
-        # Placeholder until backend/tts.py's load() has a real svara-TTS
-        # model to load - see BACKEND_COMPLETION.md Sec3.2 progress log.
         await asyncio.to_thread(tts.load)
     except Exception:
-        logger.exception("TTS model failed to load")
+        # Not fatal: main.py's speak() degrades to text-only agent_clause
+        # events when tts.ready is false, which is the whole point of the
+        # ready gate. TTS_ENGINE=svara still lands here until a real
+        # svara-TTS reference exists (BACKEND_COMPLETION.md Sec3.2).
+        logger.exception("TTS engine %r failed to load", tts_settings.engine)
 
     try:
         call_store.load()
@@ -98,6 +102,22 @@ app = FastAPI(title="AICA Audio Pipeline", lifespan=lifespan)
 # own file, its own tests) sharing this app's lifespan-loaded app.state.* -
 # see backend/telephony.py's module docstring.
 app.include_router(telephony_router)
+
+_CONSOLE_HTML = Path(__file__).resolve().parent / "console.html"
+
+
+@app.get("/console", response_class=HTMLResponse)
+async def console() -> HTMLResponse:
+    """Single-page test console for the whole pipeline.
+
+    Served from the backend itself so it shares this app's origin and can open
+    /ws/audio without CORS or a second dev server. It drives the same socket a
+    real caller does; typing a turn uses the `user_text` path, which skips only
+    VAD/ASR and exercises the identical conversation -> LLM -> tool -> TTS
+    chain. That is what makes it useful when the gated ASR model is not
+    installed - the part most likely to be missing on a fresh machine.
+    """
+    return HTMLResponse(_CONSOLE_HTML.read_text(encoding="utf-8"))
 
 
 def _validate_start_event(payload: dict[str, object], settings: AudioSettings) -> str:

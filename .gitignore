@@ -43,3 +43,4 @@ finetune/out/
 finetune/*.gguf
 finetune/aruvi-merged/
 finetune/.venv/
+logs/

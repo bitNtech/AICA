@@ -1,4 +1,30 @@
-"""svara-TTS streaming adapter (voice-cloned, sentence-chunked synthesis).
+"""TTS adapters. Two engines behind one interface, chosen by TTS_ENGINE.
+
+`edge` (EdgeTts) is the working default: Microsoft's neural Tamil voices, no
+API key, no model download, and it runs on CPU - which is what makes a voice
+demo possible on this hardware at all. ta-IN-PallaviNeural is female.
+
+PRIVACY - read before pointing this at real callers. edge sends the text to be
+spoken to a Microsoft endpoint. That is fine for local testing with the
+fictional Aruvi data in golden/, and NOT fine for real patient speech: this is
+a hospital agent and the text is PHI-adjacent (see BACKEND_COMPLETION.md Sec4,
+which already flags exactly this gap). For deployment use a self-hosted engine
+- AI4Bharat Indic Parler-TTS is the recommended first try (SETUP.md) - behind
+the same interface, and the rest of the pipeline does not change.
+
+`svara` (SvaraTts) is the original placeholder, kept because it is what
+BACKEND_COMPLETION.md Sec3.2 specifies; its load() still raises until a real
+svara-TTS reference exists.
+
+Both keep asr.py's load()/ready shape - loaded once at startup (see main.py's
+lifespan) so per-call synthesis never pays model-load latency - and both return
+mono int16 PCM at the engine's native rate. Resampling stays out of these
+adapters so one code path serves a 16 kHz browser socket today and an 8 kHz SIP
+leg later without knowing which it is talking to.
+
+Original module docstring follows.
+
+svara-TTS streaming adapter (voice-cloned, sentence-chunked synthesis).
 
 Mirrors asr.py's load()/ready shape: the model and cloned-voice reference are
 meant to be loaded once at startup (see main.py's lifespan) so per-call
@@ -17,7 +43,9 @@ package lands.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import io
 import logging
 
 import numpy as np
@@ -31,6 +59,95 @@ logger = logging.getLogger("aica.tts")
 class SynthesisResult:
     samples: np.ndarray  # mono int16 PCM at `sample_rate`
     sample_rate: int
+
+
+# Microsoft's neural voices for the languages settings.py already accepts.
+# Female by default: the golden transcripts are written around a woman at the
+# desk (Gayathri, Deepa, Kavitha...), and conversation.OPENING_LINE names her.
+_EDGE_VOICES: dict[str, str] = {
+    "ta": "ta-IN-PallaviNeural",
+    "hi": "hi-IN-SwaraNeural",
+    "te": "te-IN-ShrutiNeural",
+    "ml": "ml-IN-SobhanaNeural",
+    "kn": "kn-IN-SapnaNeural",
+    "bn": "bn-IN-TanishaaNeural",
+    "mr": "mr-IN-AarohiNeural",
+    "gu": "gu-IN-DhwaniNeural",
+    "pa": "pa-IN-OjasNeural",
+}
+
+
+class EdgeTts:
+    """Microsoft neural TTS. No API key, no model download, runs on CPU.
+
+    See this module's docstring for the privacy constraint before using it with
+    anything but the fictional test data.
+    """
+
+    def __init__(self, settings: TtsSettings) -> None:
+        self.settings = settings
+        self._voice: str | None = None
+        # edge streams MP3; libsndfile 1.2+ decodes it, and every clip so far
+        # has come back at 24 kHz. Read from the decoder rather than assumed,
+        # since main.py tells the client the rate before the first clause.
+        self._sample_rate: int = 24_000
+
+    @property
+    def ready(self) -> bool:
+        return self._voice is not None
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    def load(self) -> None:
+        import edge_tts  # noqa: F401  - fail loudly at startup, not mid-call
+        import soundfile
+
+        if "MP3" not in soundfile.available_formats():
+            raise RuntimeError(
+                "libsndfile has no MP3 decoder (needs >= 1.1); "
+                f"found {soundfile.__libsndfile_version__}. pip install -U soundfile"
+            )
+
+        voice = self.settings.voice or _EDGE_VOICES.get(self.settings.language)
+        if voice is None:
+            raise RuntimeError(f"no edge voice mapped for language {self.settings.language!r}")
+
+        self._voice = voice
+        logger.info("edge TTS ready: voice=%s", voice)
+
+    def synthesize(self, text: str, language: str) -> SynthesisResult:
+        if self._voice is None:
+            raise RuntimeError("TTS model is not loaded")
+
+        text = text.strip()
+        if not text:
+            return SynthesisResult(np.array([], dtype=np.int16), self._sample_rate)
+
+        # main.py calls this via asyncio.to_thread, so this thread has no
+        # running loop and asyncio.run() is free to make its own.
+        mp3 = asyncio.run(self._stream_mp3(text))
+        if not mp3:
+            logger.warning("edge TTS returned no audio for %r", text[:60])
+            return SynthesisResult(np.array([], dtype=np.int16), self._sample_rate)
+
+        import soundfile
+
+        waveform, sample_rate = soundfile.read(io.BytesIO(mp3), dtype="float32", always_2d=True)
+        self._sample_rate = int(sample_rate)
+        mono = waveform.mean(axis=1)
+        samples = (np.clip(mono, -1.0, 1.0) * 32767).astype(np.int16)
+        return SynthesisResult(samples=samples, sample_rate=self._sample_rate)
+
+    async def _stream_mp3(self, text: str) -> bytes:
+        import edge_tts
+
+        chunks = bytearray()
+        async for chunk in edge_tts.Communicate(text, self._voice).stream():
+            if chunk["type"] == "audio":
+                chunks += chunk["data"]
+        return bytes(chunks)
 
 
 class SvaraTts:
@@ -82,3 +199,17 @@ class SvaraTts:
         )
         samples = (np.clip(waveform, -1.0, 1.0) * 32767).astype(np.int16)
         return SynthesisResult(samples=samples, sample_rate=self.sample_rate)
+
+
+def create_tts(settings: TtsSettings):
+    """Return the adapter named by TTS_ENGINE.
+
+    main.py holds this as `SvaraTts` for typing purposes only - both adapters
+    expose the same load()/ready/sample_rate/synthesize surface, which is the
+    whole point of selecting between them here rather than at the call site.
+    """
+    if settings.engine == "edge":
+        return EdgeTts(settings)
+    if settings.engine == "svara":
+        return SvaraTts(settings)
+    raise ValueError(f"unknown TTS_ENGINE: {settings.engine!r} (expected 'edge' or 'svara')")

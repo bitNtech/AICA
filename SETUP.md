@@ -144,7 +144,47 @@ This replays all 20 `golden/flows/flow_*.txt` scenarios against whatever
 correct tool. Re-run it any time you switch models — it's the real signal for *this*
 prompt and tool set, not a generic multilingual benchmark.
 
-### TTS — nothing to install yet
+### Test console — `http://localhost:8000/console`
+
+A single self-contained page served by the backend itself, so it shares the app's
+origin and opens `/ws/audio` with no CORS and no second dev server:
+
+```bash
+uvicorn backend.main:app --reload
+# then open http://localhost:8000/console
+```
+
+It shows live readiness for socket / conversation / voice / speech-to-text, and gives
+you two ways in:
+
+- **Typed turns** — uses the socket's `user_text` path, which skips only VAD/ASR and
+  drives the identical conversation → LLM → tool → TTS chain a spoken turn does. This
+  works **without `HF_TOKEN` or the NeMo fork**, which is the part most likely to be
+  missing on a fresh machine.
+- **Microphone** — the full VAD → ASR path. Enabled only when ASR actually loaded.
+
+One-click sample turns (booking, refill, report, billing, info, and the emergency
+override) are lifted from the golden flows so you can exercise several intents without
+composing Tamil by hand. Agent replies arrive as text clauses plus raw int16 PCM at
+the rate announced in `agent_speaking_start`, scheduled back-to-back in the browser.
+
+### TTS — a real female Tamil voice, with a privacy caveat
+
+`TTS_ENGINE=edge` (the default) uses Microsoft's neural voices: **no API key, no model
+download, runs on CPU**. Tamil defaults to **`ta-IN-PallaviNeural`** (female); override
+with `TTS_VOICE` (e.g. `ta-IN-ValluvarNeural` for male). Output is 24 kHz mono int16.
+
+> **This sends each reply's text to Microsoft to be synthesised.** That is fine for the
+> fictional Aruvi data in `golden/`, and **not** fine for real patient speech — this is a
+> hospital agent and the text is PHI-adjacent, the exact gap `BACKEND_COMPLETION.md` §4
+> already flags. Before anything resembling production, swap in a self-hosted engine
+> behind the same adapter interface; nothing else in the pipeline changes.
+
+`TTS_ENGINE=svara` still selects the original placeholder, whose `load()` raises until a
+real svara-TTS reference exists. A failed TTS load is **not** fatal — `speak()` degrades
+to text-only `agent_clause` events, which is what the `ready` gate is for.
+
+### Self-hosted TTS — the production path
 
 `backend/tts.py`'s `load()` is a literal `raise NotImplementedError` placeholder — there
 is no real TTS integration in this backend at all today. No voice output will ever come
