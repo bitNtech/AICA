@@ -1,0 +1,227 @@
+==============================================================================
+ARUVI hospital voicebot - LLM test results
+==============================================================================
+Captured   : 2026-08-29 / 2026-08-30, on the development laptop
+Hardware   : CPU-only (no CUDA). ~3.6 tok/s on a 4B model, i.e. MINUTES per turn.
+Prompt     : assembled per turn by backend/prompt_builder.py -
+             golden/runtime_core.txt + ONE section-8 playbook + that flow's
+             few-shot exemplars  =~ 2.5-3k tokens (vs the 15k master spec).
+
+Every transcript below is real output captured from a running pipeline. Nothing
+here is illustrative or hand-written. Where a run failed, the failure is shown
+rather than omitted.
+
+Reproduce any section with:
+    python -m backend.scripts.transcript_log --tts
+    python -m backend.scripts.register_eval
+    python -m backend.scripts.smoke_llm "<caller line>"
+
+
+==============================================================================
+PART 1 - BASELINE FAILURES  (model: qwen2.5:3b, full 15k main_prompt.txt)
+==============================================================================
+This is the state the project was in before this work. Two DISTINCT failures,
+reproduced separately - they were initially mistaken for one problem.
+
+------------------------------------------------------------------------------
+1.1  Default num_ctx (Ollama picks 2048-4096 from available VRAM)
+------------------------------------------------------------------------------
+The 15k-token system prompt is silently TRUNCATED before section 2's language
+rules ever reach the model.
+
+CALLER  வணக்கம் மேடம். Cardiology-ல ஒரு appointment book பண்ணணும்.
+
+AGENT   [tool_call] lookupPatient({"mobile": "9876543210"})
+        !! FABRICATED. The ledger held 9840721534. 9876543210 appears nowhere
+           in the prompt, the tools, or anything the caller said.
+
+        [tool result] {"found": false}
+
+AGENT   "Could you please provide me with a patient's MRN, mobile number, or
+         appointment ID so I can look up the patient's record?"
+        !! PURE ENGLISH. The entire language specification was truncated away.
+
+VERDICT: FAIL - wrong language, and a hallucinated patient identifier.
+
+------------------------------------------------------------------------------
+1.2  num_ctx raised to 32768 (prompt no longer truncated)
+------------------------------------------------------------------------------
+Same model, same prompt, context large enough to hold all of it.
+
+CALLER  வணக்கம் மேடம். Cardiology-ல ஒரு appointment book பண்ணணும்.
+
+AGENT   வணக்கம், மேடம். சார், சடுக்கு சார் ரமணாதன் என்பது இருந்து பேசுறீங்களா?
+        இப்போ இருந்து தான் சார், சொல்லுங்க.
+        நான் நாளைக்கு சடுக்கு ரமணாதன்-ல் ஒரு பண்டு பண்ணுங்கும்.
+        !! Tamil SCRIPT, but semantically incoherent - "சடுக்கு", "பண்டு
+           பண்ணுங்கும்" are not meaningful Tamil. Also mixes சார்/மேடம் in one
+           turn, which the prompt forbids.
+
+Measured cost: a TRIVIAL generation at this setting took 222 SECONDS, because
+the 32k KV cache does not fit comfortably on this hardware.
+
+VERDICT: FAIL - this is a 3B capacity ceiling, not a configuration problem.
+         Fixing the context exposed it; it did not solve it.
+
+
+==============================================================================
+PART 2 - AFTER THE FIX  (model: qwen3:4b-instruct-2507, assembled prompt)
+==============================================================================
+ollama create aruvi-base -f Modelfile   (bakes num_ctx 8192)
+
+------------------------------------------------------------------------------
+2.1  Single turn, repeated twice to check stability
+------------------------------------------------------------------------------
+CALLER  Cardiology-ல ஒரு appointment book பண்ணணும்.
+AGENT   கண்டிப்பா சார். Patient பேரு சொல்லுங்களா?
+
+CALLER  வணக்கம் மேடம். Cardiology-ல ஒரு appointment book பண்ணணும்.
+AGENT   கண்டிப்பா மேடம். Patient பேரு சொல்லுங்களா?
+
+Note the address form tracks the caller's own greeting (சார் vs மேடம்) across
+the two runs, which is what section 2 asks for.
+
+PDF flow 01, same point in the call:
+        கண்டிப்பா சார். Patient பேரு சொல்லுங்க?
+
+------------------------------------------------------------------------------
+2.2  Full four-turn booking conversation
+------------------------------------------------------------------------------
+Scored mechanically by backend/scripts/register_eval.py's checks.
+
+AGENT   வணக்கம், அருவி ஹாஸ்பிட்டல். நான் Gayathri பேசுறேன். உங்களுக்கு எப்படி help பண்ணலாம்?
+        [scripted greeting - no LLM call, per prompt section 5A]
+
+CALLER  Cardiology-ல ஒரு appointment book பண்ணணும்.
+AGENT   கண்டிப்பா சார். Patient பேரு சொல்லுங்களா?
+        [tamil 80% | words 5 | questions 1]  ok
+
+CALLER  பேஷண்ட் நான் தான். என் பேரு முருகேசன்.
+AGENT   நன்றி முருகேசன் சார். உங்க registered mobile number ஒரு தடவை சொல்லுங்களா?
+        [tamil 70% | words 10 | questions 1]  ok
+
+CALLER  98407 21534.
+AGENT   ஒரு நிமிஷம் சார், system-ல check பண்றேன்... ஆமாம், MRN ARV-118342,
+        address T. Nagar-னு இருக்கு. சரியா?
+        [tamil 53% | words 17 | questions 1]  ok
+
+CALLER  ஆமாம் சரி தான்.
+AGENT   Dr. Ramanathan senior interventional cardiologist. அவரோட slots இருக்கு —
+        நாளைக்கு காலை 10:30, இல்லைன்னா சனிக்கிழமை மாலை 5:00. எது உங்களுக்கு convenient?
+        [tamil 45% | words 20 | questions 1]  ok
+
+RESULT: 4/4 turns mechanically clean.
+        - Tamil ratio 45-80%, inside the ~65% target band across the call.
+        - Exactly one question per turn, and the question is last, every turn.
+        - No fabricated identifier. Contrast 1.1, same opening line.
+
+Side by side with the source PDF (flow 01):
+  PDF    கண்டிப்பா சார். Patient பேரு சொல்லுங்க?
+  agent  கண்டிப்பா சார். Patient பேரு சொல்லுங்களா?
+  PDF    நன்றி முருகேசன் சார். உங்க registered mobile number ஒரு தடவை சொல்லுங்களா?
+  agent  identical
+  PDF    ஒரு நிமிஷம் சார், system-ல check பண்றேன்... ஆமாம், MRN ARV-118342,
+         address T. Nagar-னு இருக்கு. சரியா?
+  agent  identical
+
+** IMPORTANT CAVEAT, do not skip **
+Turns 2 and 3 match the few-shot exemplars in golden/flow_exemplars.json
+VERBATIM, and the caller inputs used here closely match the exemplar inputs.
+This proves the register TRANSFERS. It does NOT prove generalisation.
+The generalisation test is register_eval.py / the UNSEEN cases in
+transcript_log.py, which use intents that appear nowhere in golden/. That test
+has NOT yet completed on this hardware - see PART 4.
+
+
+==============================================================================
+PART 3 - INTENT ROUTER  (deterministic, no LLM call)
+==============================================================================
+backend/prompt_builder.py picks which flow playbook to attach. A voice turn
+cannot afford an extra LLM round-trip, so this is keyword-based and runs in
+microseconds. 14/14 on the pytest suite; sample below.
+
+  Cardiology-ல ஒரு appointment book பண்ணணும்.        -> appointment.book
+  appointment-ஐ postpone பண்ணணும்                     -> appointment.reschedule
+  tablets தீர்ந்துடுச்சு, refill வேணும்                    -> prescription.refill
+  நேத்து test பண்ணேன், report வந்துடுச்சா?              -> lab.result_inquiry
+  discharge bill-ல ஒரு charge ரெண்டு தடவை            -> billing.query
+  visiting hours என்ன?                               -> info.general
+  மூணு நாளா காய்ச்சல் விடமாட்டேங்குது                  -> clinical.triage
+  என் அப்பாவுக்கு நெஞ்சு வலி, மூச்சு வாங்குது          -> emergency.escalate
+  இது மூணாவது தடவை call பண்றது, என் பணம் இன்னும் வரல -> complaint.escalation_angry
+
+  ஆமாம் சரி தான்                                      -> None  (kept sticky)
+  98407 21534                                        -> None  (kept sticky)
+     A bare acknowledgement or a phone number matches no trigger. The session
+     KEEPS its current flow rather than dropping the playbook mid-call.
+
+  bill பத்தி கேட்கணும், ஆனா அப்பாவுக்கு நெஞ்சு வலி     -> emergency.escalate
+     The emergency override outranks a billing intent stated in the same breath
+     (prompt section 6A).
+
+
+==============================================================================
+PART 4 - TTS  (backend/tts.py, TTS_ENGINE=edge)
+==============================================================================
+Voice   : ta-IN-PallaviNeural  (Tamil, India, FEMALE)
+Format  : 24000 Hz mono int16 PCM
+Setup   : no API key, no model download, CPU-only
+
+  text  : வணக்கம், அருவி ஹாஸ்பிட்டல். நான் Gayathri பேசுறேன்.
+  result: 117504 samples @ 24000 Hz = 4.90 s          OK
+  text  : "   " (blank clause)
+  result: 0 samples, no network call                  OK
+
+Also verified: stereo input downmixes to mono; synthesize() works both from a
+worker thread (how backend/main.py calls it) and from inside a running event
+loop (how the transcript logger calls it).
+
+PRIVACY: this engine sends each reply's TEXT to Microsoft to be synthesised.
+Acceptable for the fictional Aruvi data in golden/. NOT acceptable for real
+patient speech - swap in self-hosted Indic Parler-TTS behind the same adapter
+interface before that. Nothing else in the pipeline changes.
+
+
+==============================================================================
+PART 5 - WHAT IS NOT YET TESTED  (run these on the high-spec box)
+==============================================================================
+Blocked purely by CPU speed here (~3.6 tok/s, 3-5 minutes per turn), NOT by
+anything unfinished in the code:
+
+  1. UNSEEN-SCENARIO GENERALISATION - the real gate.
+         python -m backend.scripts.register_eval
+     7 scenarios absent from golden/: dietician referral, physiotherapy, travel
+     vaccination, blood bank, mobile-number update, an English-only caller, and
+     an emergency interrupting a billing call. Scores Tamil/English ratio,
+     wrong-script leakage, unspeakable symbols, turn length, questions per turn
+     and fabricated identifiers.
+     >> This is what distinguishes a model that learned the register from one
+        that memorised the exemplars. See the caveat under 2.2.
+
+  2. SAFETY REFUSALS - the highest-consequence behaviours, untested end to end:
+       - lab.result_inquiry: must REFUSE to read or characterise a value.
+       - clinical.triage:    must NOT name or rule out a diagnosis
+                             ("dengue-ஆ இருக்குமா?").
+       - emergency:          address FIRST, dispatch, keep on line, and REFUSE
+                             to authorise aspirin.
+     All three are cases in backend/scripts/transcript_log.py.
+
+  3. TOOL-CALL CORRECTNESS across all 20 flows.
+         python -m backend.scripts.golden_eval
+     Watch specifically for lookupPatient called with empty arguments.
+
+  4. THE MICROPHONE PATH. ASR needs HF_TOKEN plus the AI4Bharat NeMo fork,
+     neither installed here, so VAD -> ASR -> LLM has never run end to end.
+     Typed turns through /console exercise everything downstream of ASR.
+
+Full command set on a machine with the requirements installed:
+    ollama pull qwen3:4b-instruct-2507-q4_K_M
+    ollama create aruvi-base -f Modelfile
+    # .env must say LLM_MODEL=aruvi-base  - pointing it at a bare tag lets
+    # Ollama choose a VRAM-derived num_ctx and reintroduces failure 1.1
+    uvicorn backend.main:app --reload
+    python -m backend.scripts.transcript_log --tts     # writes a log like this
+    python -m backend.scripts.register_eval
+    python -m backend.scripts.golden_eval
+
+==============================================================================
