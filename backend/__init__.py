@@ -1,1 +1,0 @@
-"""AICA backend package."""

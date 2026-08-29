@@ -10,8 +10,8 @@ integration for those yet. The one page that talks to a real backend is **Simula
 Run simulation**, which opens `DirectTestingPanel`: a manual one-on-one test call against the
 agent backend's `/ws/audio` WebSocket contract.
 
-The Python/FastAPI backend that powers that contract lives in this same repo, under
-[backend/](backend/) — see [SETUP.md](SETUP.md) for running both together locally.
+The Python/FastAPI backend that powers that contract lives on the separate
+[`backend`](../../tree/backend) branch — see its README/SETUP.md for running it locally.
 
 ## Setup
 
@@ -42,13 +42,6 @@ npm run dev
 Copy [`.env.example`](.env.example) to `.env` and point it at a running backend instance. Without
 it, the testing panel shows a connection error rather than silently falling back to mocked
 replies.
-
-## Two "frontends"
-
-This repo is the admin dashboard. [`legacy_test_client/`](legacy_test_client/) is a separate,
-minimal browser test harness (a plain HTML/JS page used to exercise `/ws/audio` directly,
-independent of this dashboard) that predates it — if you're looking for AICA's actual UI, this
-repo's `src/` is it; that page is just a debugging tool for the backend.
 
 ## Testing
 
