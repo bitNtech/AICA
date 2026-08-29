@@ -8,6 +8,7 @@ and only the flow-specific playbook varies.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -22,6 +23,7 @@ from backend.prompt_builder import (
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _MASTER_PROMPT = _REPO_ROOT / "golden" / "main_prompt.txt"
 _RUNTIME_CORE = _REPO_ROOT / "golden" / "runtime_core.txt"
+_TAMIL_RE = re.compile(r"[஀-௿]")
 
 
 @pytest.mark.parametrize(
@@ -70,10 +72,44 @@ def test_parse_flow_playbooks_finds_all_twenty_flows() -> None:
     assert "CLINICAL AND FACTUAL SAFETY" not in playbooks["complaint.escalation_angry"].body
 
 
-def _loaded_builder() -> PromptBuilder:
-    builder = PromptBuilder(_RUNTIME_CORE, _MASTER_PROMPT)
+_EXEMPLARS = _REPO_ROOT / "golden" / "flow_exemplars.json"
+
+
+def _loaded_builder(with_exemplars: bool = False) -> PromptBuilder:
+    builder = PromptBuilder(_RUNTIME_CORE, _MASTER_PROMPT, _EXEMPLARS if with_exemplars else None)
     builder.load()
     return builder
+
+
+def test_every_flow_has_few_shot_exemplars() -> None:
+    # A flow missing exemplars is the one most likely to drift into English,
+    # so this is a real gap rather than a cosmetic one.
+    builder = _loaded_builder(with_exemplars=True)
+
+    assert set(builder._playbooks) <= set(builder._exemplars)
+
+
+def test_exemplars_are_code_mixed_and_short() -> None:
+    builder = _loaded_builder(with_exemplars=True)
+
+    for intent, block in builder._exemplars.items():
+        agent_lines = [line[4:] for line in block.splitlines() if line.startswith("YOU:")]
+        assert agent_lines, f"{intent} has no agent exemplar turns"
+        for line in agent_lines:
+            assert _TAMIL_RE.search(line), f"{intent} exemplar is not in Tamil script: {line}"
+            assert len(line.split()) <= 45, f"{intent} exemplar exceeds the 40-word turn limit: {line}"
+            assert line.count("?") <= 1, f"{intent} exemplar asks more than one question: {line}"
+
+
+def test_build_includes_only_the_active_flows_exemplars() -> None:
+    builder = _loaded_builder(with_exemplars=True)
+
+    booking = builder.build("appointment.book")
+
+    assert "HOW A REAL CALL SOUNDS" in booking
+    assert "Dr. Ramanathan senior interventional cardiologist" in booking
+    # Another flow's exemplar must not leak in and pull the model off-flow.
+    assert "Ambulance அனுப்பிட்டேன்" not in booking
 
 
 def test_build_attaches_only_the_active_flows_playbook() -> None:

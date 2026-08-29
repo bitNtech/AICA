@@ -73,7 +73,9 @@ class ConversationManager:
 
     def __init__(self, settings: ConversationSettings) -> None:
         self.settings = settings
-        self.prompts = PromptBuilder(settings.runtime_core_path, settings.prompt_path)
+        self.prompts = PromptBuilder(
+            settings.runtime_core_path, settings.prompt_path, settings.exemplars_path
+        )
         self.db = MockHospitalDb()
         self._sessions: dict[str, CallSession] = {}
 

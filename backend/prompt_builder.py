@@ -20,6 +20,7 @@ voice channel and small enough that the language rules are never truncated away.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 from pathlib import Path
 import re
@@ -177,14 +178,26 @@ def parse_flow_playbooks(master_prompt: str) -> dict[str, FlowPlaybook]:
     return playbooks
 
 
-class PromptBuilder:
-    """Assembles core + one flow playbook into the per-turn system prompt."""
+def _format_exemplars(exchanges: list[list[str]]) -> str:
+    lines = []
+    for role, text in exchanges:
+        speaker = "CALLER" if role == "caller" else "YOU"
+        lines.append(f"{speaker}: {text}")
+    return "\n".join(lines)
 
-    def __init__(self, core_path: Path, master_prompt_path: Path) -> None:
+
+class PromptBuilder:
+    """Assembles core + one flow's playbook and exemplars into the turn prompt."""
+
+    def __init__(
+        self, core_path: Path, master_prompt_path: Path, exemplars_path: Path | None = None
+    ) -> None:
         self.core_path = core_path
         self.master_prompt_path = master_prompt_path
+        self.exemplars_path = exemplars_path
         self._core: str | None = None
         self._playbooks: dict[str, FlowPlaybook] = {}
+        self._exemplars: dict[str, str] = {}
 
     @property
     def ready(self) -> bool:
@@ -193,10 +206,25 @@ class PromptBuilder:
     def load(self) -> None:
         self._core = self.core_path.read_text(encoding="utf-8")
         self._playbooks = parse_flow_playbooks(self.master_prompt_path.read_text(encoding="utf-8"))
+
+        if self.exemplars_path is not None and self.exemplars_path.exists():
+            raw = json.loads(self.exemplars_path.read_text(encoding="utf-8"))
+            self._exemplars = {
+                intent: _format_exemplars(exchanges)
+                for intent, exchanges in raw.items()
+                if not intent.startswith("_")
+            }
+            missing = set(self._playbooks) - set(self._exemplars)
+            if missing:
+                # Not fatal - a flow without exemplars still gets rules and a
+                # playbook - but it is the flow most likely to drift, so say so.
+                logger.warning("no few-shot exemplars for: %s", ", ".join(sorted(missing)))
+
         logger.info(
-            "prompt builder loaded: core=%d chars, %d flow playbooks",
+            "prompt builder loaded: core=%d chars, %d playbooks, %d exemplar sets",
             len(self._core),
             len(self._playbooks),
+            len(self._exemplars),
         )
 
     def build(self, intent: str | None) -> str:
@@ -204,13 +232,28 @@ class PromptBuilder:
         if self._core is None:
             raise RuntimeError("PromptBuilder is not loaded")
 
-        playbook = self._playbooks.get(intent or "") or self._playbooks.get(DEFAULT_FLOW)
+        resolved = intent if intent in self._playbooks else DEFAULT_FLOW
+        playbook = self._playbooks.get(resolved)
         if playbook is None:
             return self._core
 
-        return (
-            f"{self._core}\n"
-            "## THIS CALL'S PLAYBOOK — the flow you are handling right now\n"
-            "Wording shown is a MODEL, not a script. Say it in your own words, one point per turn.\n"
-            f"{playbook.body}\n"
-        )
+        parts = [
+            self._core,
+            "## THIS CALL'S PLAYBOOK — the flow you are handling right now",
+            "Wording shown is a MODEL, not a script. Say it in your own words, one point per turn.",
+            playbook.body,
+        ]
+
+        exemplars = self._exemplars.get(resolved)
+        if exemplars:
+            # Rules describe the register; examples ARE the register. This is
+            # what actually holds a small model in Tamil-English code-mix.
+            parts += [
+                "",
+                "## HOW A REAL CALL SOUNDS — copy this register, not these facts",
+                "Never reuse a name, number or ID from this example. Match only the "
+                "language mix, the sentence length, and the one-question-per-turn pacing.",
+                exemplars,
+            ]
+
+        return "\n".join(parts) + "\n"

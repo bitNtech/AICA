@@ -115,6 +115,12 @@ class ConversationSettings:
         os.getenv("CONVERSATION_RUNTIME_CORE_PATH", str(_REPO_ROOT / "golden" / "runtime_core.txt"))
     )
 
+    # Two or three real exchanges per flow. Rules describe the register;
+    # examples are what actually hold a small model in Tamil-English code-mix.
+    exemplars_path: Path = Path(
+        os.getenv("CONVERSATION_EXEMPLARS_PATH", str(_REPO_ROOT / "golden" / "flow_exemplars.json"))
+    )
+
     # Hard cap on LLM<->tool round-trips per caller turn, so a confused model
     # can't chain tool calls forever instead of answering.
     max_tool_iterations: int = int(os.getenv("LLM_MAX_TOOL_ITERATIONS", "6"))
