@@ -207,7 +207,10 @@ class PromptBuilder:
         self._core = self.core_path.read_text(encoding="utf-8")
         self._playbooks = parse_flow_playbooks(self.master_prompt_path.read_text(encoding="utf-8"))
 
-        if self.exemplars_path is not None and self.exemplars_path.exists():
+        # is_file(), not exists(): once the register is fine-tuned in, exemplars
+        # are switched off with a blank CONVERSATION_EXEMPLARS_PATH, and a blank
+        # path resolves to the CWD - a directory, which exists() happily accepts.
+        if self.exemplars_path is not None and self.exemplars_path.is_file():
             raw = json.loads(self.exemplars_path.read_text(encoding="utf-8"))
             self._exemplars = {
                 intent: _format_exemplars(exchanges)

@@ -35,3 +35,11 @@ venv/
 NeMo_ai4bharat/
 .vev-*
 call_events.db
+
+# Fine-tuning artefacts: adapters/merged weights/GGUF are GB-scale, rebuild them
+# from finetune/train_lora.py rather than committing them.
+finetune/__pycache__/
+finetune/out/
+finetune/*.gguf
+finetune/aruvi-merged/
+finetune/.venv/
