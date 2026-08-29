@@ -53,7 +53,10 @@ def _captured_log_records(logger_name: str):
 
 def _make_manager(max_tool_iterations: int = 6) -> ConversationManager:
     manager = ConversationManager(ConversationSettings(max_tool_iterations=max_tool_iterations))
-    manager._prompt_template = TEMPLATE
+    # Stub the builder rather than reading the real prompt files: these tests
+    # assert conversation plumbing, not prompt content.
+    manager.prompts._core = TEMPLATE
+    manager.prompts._playbooks = {}
     return manager
 
 

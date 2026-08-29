@@ -102,8 +102,17 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 class ConversationSettings:
     """Config for the Conversation Manager: master prompt location and tool-loop bounds."""
 
+    # The full ~15k-token specification. It is NOT sent whole any more - only
+    # its section-8 flow playbooks are parsed out of it, one per turn, by
+    # backend/prompt_builder.py. It stays the single source of truth for those.
     prompt_path: Path = Path(
         os.getenv("CONVERSATION_PROMPT_PATH", str(_REPO_ROOT / "golden" / "main_prompt.txt"))
+    )
+
+    # The condensed core actually sent every turn (~1.5k tokens): language,
+    # turn discipline, ledger, grounding, clinical safety, emergency override.
+    runtime_core_path: Path = Path(
+        os.getenv("CONVERSATION_RUNTIME_CORE_PATH", str(_REPO_ROOT / "golden" / "runtime_core.txt"))
     )
 
     # Hard cap on LLM<->tool round-trips per caller turn, so a confused model

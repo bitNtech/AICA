@@ -1,0 +1,18 @@
+# ARUVI hospital voicebot — Ollama wrapper for the BASE (un-finetuned) model.
+#
+# num_ctx is set explicitly because Ollama's default is VRAM-derived (often
+# 2048-4096) and would silently truncate the system prompt before its language
+# rules — the exact bug that made the agent answer in English and invent a
+# caller mobile number.
+#
+# 8192, not 32768: backend/prompt_builder.py now sends a ~1.5-2.5k token
+# assembled prompt instead of the 15k master spec, so 8192 holds it plus a full
+# call's history with room to spare. 32768 allocates a KV cache far too large
+# for a 4GB card (a trivial generation measured 222s on CPU at that setting).
+#
+# Build:  ollama create aruvi-base -f Modelfile
+# Use:    LLM_MODEL=aruvi-base in .env
+FROM qwen3:4b-instruct-2507-q4_K_M
+
+PARAMETER num_ctx 8192
+PARAMETER temperature 0.3

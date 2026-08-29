@@ -79,7 +79,10 @@ class _FakeTts:
 
 def _make_manager(agent_name: str = "Gayathri") -> ConversationManager:
     manager = ConversationManager(ConversationSettings(agent_name=agent_name))
-    manager._prompt_template = TEMPLATE
+    # Stub the builder rather than reading the real prompt files: these tests
+    # assert telephony plumbing, not prompt content.
+    manager.prompts._core = TEMPLATE
+    manager.prompts._playbooks = {}
     return manager
 
 

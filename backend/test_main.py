@@ -113,7 +113,10 @@ def _scripted_vad(flags: list[int]):
 
 def _make_conversation() -> ConversationManager:
     manager = ConversationManager(ConversationSettings())
-    manager._prompt_template = PROMPT_TEMPLATE
+    # Stub the builder rather than reading the real prompt files: these tests
+    # assert websocket/session plumbing, not prompt content.
+    manager.prompts._core = PROMPT_TEMPLATE
+    manager.prompts._playbooks = {}
     return manager
 
 

@@ -19,6 +19,7 @@ import logging
 import re
 
 from .llm import LlmClient, LlmReply
+from .prompt_builder import PromptBuilder, detect_intent
 from .settings import ConversationSettings
 from .tools import TOOL_SCHEMAS, MockHospitalDb, execute_tool
 
@@ -60,44 +61,54 @@ class CallSession:
     metadata: dict[str, str]
     ledger: dict[str, object] = field(default_factory=dict)
     messages: list[dict] = field(default_factory=list)
+    # Sticky across turns: a caller states their reason once, then answers
+    # follow-up questions ("ஆமாம்", a phone number) that match no trigger at
+    # all. Re-detecting per turn would drop the playbook mid-flow, so a new
+    # detection replaces this and silence leaves it alone (Sec6E).
+    intent: str | None = None
 
 
 class ConversationManager:
-    """Owns the master prompt, per-call sessions, and the shared mock hospital DB."""
+    """Owns the prompt builder, per-call sessions, and the shared mock hospital DB."""
 
     def __init__(self, settings: ConversationSettings) -> None:
         self.settings = settings
-        self._prompt_template: str | None = None
+        self.prompts = PromptBuilder(settings.runtime_core_path, settings.prompt_path)
         self.db = MockHospitalDb()
         self._sessions: dict[str, CallSession] = {}
 
     @property
     def ready(self) -> bool:
-        return self._prompt_template is not None
+        return self.prompts.ready
 
     def load(self) -> None:
-        """Read the master prompt once during startup, keeping call-time latency low."""
-        self._prompt_template = self.settings.prompt_path.read_text(encoding="utf-8")
-        logger.info("loaded master prompt (%d chars)", len(self._prompt_template))
+        """Read the prompts once during startup, keeping call-time latency low."""
+        self.prompts.load()
 
     def start_call(self, connection_id: str, **metadata: str) -> str:
         """Open a new call session and return the scripted greeting (Sec5A - no LLM call)."""
-        if self._prompt_template is None:
+        if not self.prompts.ready:
             raise RuntimeError("ConversationManager prompt is not loaded")
 
-        system_prompt = render_template(self._prompt_template, metadata)
         greeting = render_template(OPENING_LINE, metadata)
         session = CallSession(
             connection_id=connection_id,
             metadata=dict(metadata),
             ledger=dict(metadata),
+            # The system message is a placeholder here and rewritten every turn
+            # by _refresh_system_prompt() once the flow is known - index 0 is
+            # reserved for it so history stays append-only.
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": ""},
                 {"role": "assistant", "content": greeting},
             ],
         )
+        session.messages[0]["content"] = self._system_prompt_for(session)
         self._sessions[connection_id] = session
         return greeting
+
+    def _system_prompt_for(self, session: CallSession) -> str:
+        return render_template(self.prompts.build(session.intent), session.metadata)
 
     def end_call(self, connection_id: str) -> None:
         self._sessions.pop(connection_id, None)
@@ -108,10 +119,16 @@ class ConversationManager:
         if session is None:
             raise RuntimeError(f"no active call session for {connection_id}")
 
+        detected = detect_intent(text)
+        if detected is not None and detected != session.intent:
+            logger.info("flow detected for %s: %s", connection_id, detected)
+            session.intent = detected
+        session.messages[0]["content"] = self._system_prompt_for(session)
+
         session.messages.append({"role": "user", "content": text})
 
         for _ in range(self.settings.max_tool_iterations):
-            reply = await llm.complete(session.messages, TOOL_SCHEMAS)
+            reply = await llm.complete(_with_language_reminder(session.messages), TOOL_SCHEMAS)
 
             if not reply.tool_calls:
                 session.messages.append({"role": "assistant", "content": reply.content})
@@ -131,6 +148,22 @@ class ConversationManager:
 
         logger.error("tool-call loop did not terminate within %d iterations for %s", self.settings.max_tool_iterations, connection_id)
         raise RuntimeError("LLM tool-call loop did not terminate")
+
+
+# Recency beats distance: a small model reliably drifts into pure English by
+# the third or fourth turn even with the language rules in the system message,
+# because those sit thousands of tokens back while the recent turns are the
+# strongest signal. This rides immediately before generation, costs ~40 tokens,
+# and is not stored in history - so it never accumulates across a long call.
+_LANGUAGE_REMINDER = (
+    "[Reply in spoken Chennai Tamil in Tamil script, code-mixed with English "
+    "hospital words in Latin script. Never reply in pure English. One question "
+    "only, asked last, under 40 words. Never invent an ID, number or name.]"
+)
+
+
+def _with_language_reminder(messages: list[dict]) -> list[dict]:
+    return [*messages, {"role": "system", "content": _LANGUAGE_REMINDER}]
 
 
 def _assistant_tool_call_message(reply: LlmReply) -> dict:
