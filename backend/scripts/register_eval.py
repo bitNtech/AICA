@@ -39,8 +39,11 @@ _TAMIL_RE = re.compile(r"[஀-௿]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
 # Devanagari / Kannada / Telugu - Sec2 forbids all three outright.
 _WRONG_SCRIPT_RE = re.compile(r"[ऀ-ॿಀ-೿ఀ-౿]")
-# Sec2 "audio stability": these must never reach a TTS engine.
-_SPOKEN_SYMBOL_RE = re.compile(r"[*#|•→\[\]{}<>_`]|\d+\.\s")
+# Sec2 "audio stability": these must never reach a TTS engine. The numbered-list
+# arm is anchored to line start on purpose - unanchored, it fires on the period
+# after any time or amount ("மாலை 5:00. எது...") and reports a correct turn as
+# broken, which is worse than missing a list.
+_SPOKEN_SYMBOL_RE = re.compile(r"[*#|•→\[\]{}<>_`]|^\s*\d+[.)]\s", re.MULTILINE)
 _WORD_RE = re.compile(r"[\w஀-௿]+")
 
 # Names/IDs the model must never emit: they are in neither the ledger, the
