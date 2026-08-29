@@ -1,58 +1,50 @@
-# AICA
+# AICA — backend
 
-The admin dashboard for AICA — an AI front-desk attendant that answers inbound calls, handles
-minimal front-desk tasks itself (scheduling, hours, simple intake), and redirects anything past
-that scope to staff. React 19 + TypeScript + Vite + Tailwind v4 + Zustand + `@xyflow/react`.
+The Python/FastAPI backend powering AICA, an AI front-desk attendant that answers inbound calls,
+handles minimal front-desk tasks itself (scheduling, hours, simple intake), and redirects anything
+past that scope to staff.
 
-Most of the app (Dashboard, Call Log, Knowledge Base, Agent Builder, Budget, Integrations,
-Settings) runs on fixture data in [`src/data/mock.ts`](src/data/mock.ts) — there is no backend
-integration for those yet. The one page that talks to a real backend is **Simulation & Testing →
-Run simulation**, which opens `DirectTestingPanel`: a manual one-on-one test call against the
-agent backend's `/ws/audio` WebSocket contract.
+```
+Browser mic/keyboard --WebSocket--> FastAPI /ws/audio --> TEN VAD --> IndicConformer ASR (Tamil)
+      --> Conversation Manager --> LLM (OpenAI-compatible, e.g. Ollama) --> [TTS: not built yet]
+      --> agent reply text streams back to the browser transcript
+```
 
-The Python/FastAPI backend that powers that contract lives in this same repo, under
-[backend/](backend/) — see [SETUP.md](SETUP.md) for running both together locally.
+The React admin dashboard that talks to this backend's `/ws/audio` contract lives on the separate
+[`frontend-aica-ui`](../../tree/frontend-aica-ui) branch — see its README for the UI side. See
+[SETUP.md](SETUP.md) for running both together locally.
 
 ## Setup
 
+See [SETUP.md](SETUP.md) for the full walkthrough (Python version, the AI4Bharat NeMo fork, HF
+token, Ollama). Quick version:
+
 ```bash
-npm install
-cp .env.example .env   # point VITE_BACKEND_WS_URL at your backend
-npm run dev
+py -3.11 -m venv .venv && source .venv/bin/activate   # or .venv/Scripts/Activate.ps1 on Windows
+pip install -r requirements.txt
+git clone --depth 1 https://github.com/AI4Bharat/NeMo.git NeMo_ai4bharat
+pip install -e ./NeMo_ai4bharat --no-deps
+cp .env.example .env   # add HF_TOKEN, point LLM_BASE_URL/LLM_MODEL at your LLM
+uvicorn backend.main:app --reload   # serves ws://localhost:8000/ws/audio
 ```
 
-## Scripts
-
-| Command | Does |
-| --- | --- |
-| `npm run dev` | Start the Vite dev server |
-| `npm run build` | Typecheck (`tsc -b`) and build for production |
-| `npm run preview` | Serve the production build locally |
-| `npm run lint` | oxlint |
-| `npm run typecheck` | `tsc -b` only |
-| `npm run test` | Run the Vitest suite once |
-| `npm run test:watch` | Vitest in watch mode |
-
-## Environment variables
-
-| Variable | Used by | Default |
-| --- | --- | --- |
-| `VITE_BACKEND_WS_URL` | `DirectTestingPanel` (Simulation & Testing) | none — required to run a real test call |
-
-Copy [`.env.example`](.env.example) to `.env` and point it at a running backend instance. Without
-it, the testing panel shows a connection error rather than silently falling back to mocked
-replies.
-
-## Two "frontends"
-
-This repo is the admin dashboard. [`legacy_test_client/`](legacy_test_client/) is a separate,
-minimal browser test harness (a plain HTML/JS page used to exercise `/ws/audio` directly,
-independent of this dashboard) that predates it — if you're looking for AICA's actual UI, this
-repo's `src/` is it; that page is just a debugging tool for the backend.
+`run.sh` starts this backend plus [`legacy_test_client/`](legacy_test_client/), a minimal static
+HTML/JS page for exercising `/ws/audio` directly without the React dashboard.
 
 ## Testing
 
-Vitest + React Testing Library. Tests live alongside the code they cover (`__tests__/` folders).
-Coverage today is the pure utilities in `src/lib/` and the `useTestCallSocket` hook (exercised
-against a fake `WebSocket`, not a real backend). CI (`.github/workflows/ci.yml`) runs lint,
-typecheck, tests, and a production build on every push and PR.
+```bash
+pytest
+python -m backend.scripts.golden_eval   # replays golden/flows/*.txt against your configured LLM
+```
+
+## Known limitations
+
+- **No voice output** — `backend/tts.py`'s `load()` is a placeholder; TTS is not built yet.
+- **No real phone line** — `backend/telephony.py` is a code-complete, unit-tested adapter for
+  Twilio-Media-Streams-shaped input, but has never been wired to an actual SIP trunk/DID; only the
+  browser WebSocket (`/ws/audio`) is a live transport today.
+- **Single-process concurrency** — one global ASR/TTS semaphore pool; fine for one caller at a
+  time, not load-tested for many simultaneous callers.
+
+See [BACKEND_COMPLETION.md](BACKEND_COMPLETION.md) for the fuller design/progress log.
