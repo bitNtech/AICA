@@ -54,7 +54,7 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
   return (
     <nav
       aria-label="Primary"
-      className={`flex h-screen w-[72px] shrink-0 flex-col bg-nav transition-[width] duration-150 ease-out ${
+      className={`aica-nav-rail flex h-screen w-[72px] shrink-0 flex-col bg-nav/95 backdrop-blur-xl transition-[width] duration-150 ease-out ${
         expanded ? 'lg:w-64' : 'lg:w-[72px]'
       }`}
     >
@@ -98,7 +98,7 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
         {GROUPS.map((group) => (
           <div key={group.label}>
             {expanded && (
-              <p className="hidden px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/40 lg:block">
+              <p className="aica-nav-section-label hidden px-2.5 pb-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-mist/55 lg:block">
                 {group.label}
               </p>
             )}
@@ -123,7 +123,7 @@ export function NavRail({ activeId, onSelect }: NavRailProps) {
 
       <div className="border-t border-white/10 px-2 py-3 lg:px-3">
         {expanded && (
-          <p className="hidden px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-mist/40 lg:block">
+          <p className="aica-nav-section-label hidden px-2.5 pb-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-mist/55 lg:block">
             Governance
           </p>
         )}
@@ -180,9 +180,9 @@ function NavRow({
         title={item.label}
         onClick={() => onSelect(item.id)}
         aria-current={active ? 'page' : undefined}
-        className={`group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-150 lg:px-3 ${
+        className={`aica-nav-item group relative flex w-full items-center gap-3 rounded-lg border border-transparent px-2.5 py-2 text-left text-sm transition-all duration-200 lg:px-3 ${
           active
-            ? 'bg-white/[0.14] text-mist'
+            ? 'aica-nav-bubble border-white/35 bg-white/[0.18] text-mist shadow-sm'
             : muted
               ? 'text-mist/45 hover:bg-white/10 hover:text-mist/80'
               : 'text-mist/70 hover:bg-white/10 hover:text-mist'
@@ -198,7 +198,7 @@ function NavRow({
           className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-mist' : 'opacity-80'}`}
         />
         {expanded && (
-          <span className="hidden truncate font-medium lg:inline">
+          <span className={`aica-nav-label hidden truncate text-[13.5px] tracking-[0.01em] lg:inline ${active ? 'font-semibold' : 'font-medium'}`}>
             {item.label}
           </span>
         )}

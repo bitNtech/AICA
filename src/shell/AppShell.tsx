@@ -24,7 +24,7 @@ export function AppShell({
   const agentStatus = useAgentStore((s) => s.status)
 
   return (
-    <div className="flex h-screen bg-canvas">
+    <div className="aica-app-shell flex h-screen bg-canvas">
       <NavRail activeId={activeNavId} onSelect={onNavSelect} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
@@ -33,7 +33,12 @@ export function AppShell({
           agentStatus={agentStatus}
           onNavigate={onNavSelect}
         />
-        <main className="flex-1 overflow-y-auto p-6 font-content lg:p-8">{children}</main>
+        <main
+          key={activeNavId}
+          className="aica-page-content flex-1 overflow-y-auto p-6 font-content lg:p-8"
+        >
+          {children}
+        </main>
       </div>
       <ContextDrawer />
     </div>
