@@ -272,6 +272,7 @@ if ! "$VENV_PYTHON" -c "import nemo.collections.asr" >/dev/null 2>&1; then
   "$VENV_PYTHON" -m pip install -e "$BACKEND_DIR/NeMo_ai4bharat" --no-deps
 
   # --no-deps above skips NeMo's own runtime deps, so install those
+<<<<<<< HEAD
   # separately, one package at a time. `triton` has no Windows wheel on
   # PyPI and is excluded entirely (NeMo's ASR code imports and runs fine
   # without it for CPU/CUDA inference on Windows). Beyond triton, other
@@ -315,6 +316,24 @@ else
   echo "[setup] FAIL: nemo.collections.asr could not be imported." >&2
   echo "[setup] Full traceback logged to $SETUP_LOG — search for the last 'Traceback' entry." >&2
   echo "[setup] ASR will not work until this is fixed, but the rest of setup will continue." >&2
+=======
+  # separately. NeMo's requirements files list `triton`, which has no
+  # Windows wheel on PyPI and aborts the whole install if left in — filter
+  # it into temp copies rather than editing the upstream fork. NeMo's ASR
+  # code imports and runs fine without triton for CPU/CUDA inference.
+  log "Installing NeMo's runtime dependencies (triton filtered out)..."
+  NEMO_REQ_DIR="$BACKEND_DIR/NeMo_ai4bharat/requirements"
+  TMP_REQ_DIR="$(mktemp -d)"
+  NEMO_REQ_ARGS=()
+  for f in requirements.txt requirements_common.txt requirements_asr.txt; do
+    if [[ -f "$NEMO_REQ_DIR/$f" ]]; then
+      grep -v '^triton\b' "$NEMO_REQ_DIR/$f" > "$TMP_REQ_DIR/$f"
+      NEMO_REQ_ARGS+=("-r" "$TMP_REQ_DIR/$f")
+    fi
+  done
+  "$VENV_PYTHON" -m pip install "${NEMO_REQ_ARGS[@]}" librosa soundfile
+  rm -rf "$TMP_REQ_DIR"
+>>>>>>> 47145a72d3918dd73b234eede50c1da9453ea224
 fi
 echo
 
