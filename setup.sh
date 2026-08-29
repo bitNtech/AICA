@@ -43,6 +43,16 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 SKIP_RUN="${SETUP_SKIP_RUN:-0}"
 
+# ---------------------------------------------------------------------------
+# Persistent logging — every run appends to setup.log so nothing is ever
+# lost to terminal buffering/scrollback (this has repeatedly hidden real
+# errors in Git Bash on Windows). Check this file first whenever the script
+# seems to "silently stop."
+# ---------------------------------------------------------------------------
+SETUP_LOG="$FRONTEND_DIR/setup.log"
+echo "=== setup.sh run started $(date -u +'%Y-%m-%dT%H:%M:%SZ') ===" >> "$SETUP_LOG"
+exec > >(tee -a "$SETUP_LOG") 2>&1
+
 log()  { echo "[setup] $*"; }
 warn() { echo "[setup] WARNING: $*" >&2; }
 
@@ -221,14 +231,35 @@ else
 fi
 
 log "Installing backend Python dependencies (pulls torch/transformers/etc — large, be patient)..."
-"$VENV_PYTHON" -m pip install --upgrade pip
-"$VENV_PYTHON" -m pip install -r "$BACKEND_DIR/requirements.txt"
-# No special --index-url here: PyPI's default torch/torchaudio wheels on
-# Linux/Windows already bundle CUDA support and use it automatically when an
-# NVIDIA driver is present (falling back to CPU otherwise), and the macOS
-# wheel uses Apple's MPS backend the same way — nothing to branch on here.
+"$VENV_PYTHON" -m pip install --upgrade pip || warn "pip self-upgrade failed — continuing with existing pip."
+if ! "$VENV_PYTHON" -m pip install -r "$BACKEND_DIR/requirements.txt"; then
+  echo "ERROR: failed to install $BACKEND_DIR/requirements.txt — see $SETUP_LOG for the full pip error." >&2
+  exit 1
+fi
+
+# On Linux and macOS, PyPI's default torch/torchaudio wheels bundle CUDA (or
+# use Apple's MPS backend) and pick it up automatically when a driver is
+# present. On WINDOWS this is NOT true: PyPI's default torch wheel there is
+# CPU-only. If an NVIDIA GPU was detected earlier, explicitly reinstall
+# torch/torchaudio from PyTorch's CUDA wheel index so the GPU actually gets
+# used — otherwise ASR/LLM inference silently runs on CPU despite having a
+# GPU sitting idle.
+if [[ "$OS" == "windows" && -n "$GPU_VRAM_MB" ]]; then
+  log "Windows + NVIDIA GPU detected — reinstalling torch/torchaudio with CUDA support..."
+  CUDA_INDEX="https://download.pytorch.org/whl/cu121"
+  if ! "$VENV_PYTHON" -m pip install --force-reinstall torch torchaudio --index-url "$CUDA_INDEX"; then
+    warn "CUDA torch install from $CUDA_INDEX failed — falling back to CPU-only torch."
+    warn "If your driver needs a different CUDA version, install manually, e.g.:"
+    warn "  $VENV_PYTHON -m pip install --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu124"
+  fi
+fi
+
 CUDA_STATUS="$("$VENV_PYTHON" -c 'import torch; print(torch.cuda.is_available())' 2>/dev/null || echo "unknown")"
 log "torch.cuda.is_available(): $CUDA_STATUS"
+if [[ "$OS" == "windows" && -n "$GPU_VRAM_MB" && "$CUDA_STATUS" != "True" ]]; then
+  warn "GPU was detected but torch still isn't using CUDA. ASR/LLM inference will run on CPU (slow)."
+  warn "Check your NVIDIA driver version and try a matching wheel index from https://pytorch.org/get-started/locally/"
+fi
 
 if [[ -d "$BACKEND_DIR/NeMo_ai4bharat" ]]; then
   log "NeMo_ai4bharat/ already present."
@@ -239,6 +270,51 @@ fi
 if ! "$VENV_PYTHON" -c "import nemo.collections.asr" >/dev/null 2>&1; then
   log "Installing the AI4Bharat NeMo fork..."
   "$VENV_PYTHON" -m pip install -e "$BACKEND_DIR/NeMo_ai4bharat" --no-deps
+
+  # --no-deps above skips NeMo's own runtime deps, so install those
+  # separately, one package at a time. `triton` has no Windows wheel on
+  # PyPI and is excluded entirely (NeMo's ASR code imports and runs fine
+  # without it for CPU/CUDA inference on Windows). Beyond triton, other
+  # NeMo deps can also fail to build on Windows (missing C++ build tools,
+  # Linux-only packages) — installing per-package means one bad dependency
+  # doesn't silently abort everything else, matching the "best effort"
+  # approach the rest of this script already uses.
+  log "Installing NeMo's runtime dependencies (per-package, triton excluded)..."
+  NEMO_REQ_DIR="$BACKEND_DIR/NeMo_ai4bharat/requirements"
+  NEMO_PACKAGES=()
+  for f in requirements.txt requirements_common.txt requirements_asr.txt; do
+    if [[ -f "$NEMO_REQ_DIR/$f" ]]; then
+      while IFS= read -r line; do
+        # Skip blank lines, comments, and triton.
+        [[ -z "$line" || "$line" =~ ^# ]] && continue
+        [[ "$line" =~ ^triton([<>=[:space:];]|$) ]] && continue
+        NEMO_PACKAGES+=("$line")
+      done < "$NEMO_REQ_DIR/$f"
+    fi
+  done
+  NEMO_PACKAGES+=("librosa" "soundfile")
+
+  NEMO_FAILED=()
+  for pkg in "${NEMO_PACKAGES[@]}"; do
+    if ! "$VENV_PYTHON" -m pip install "$pkg" >/dev/null 2>>"$SETUP_LOG"; then
+      warn "failed to install: $pkg (see $SETUP_LOG for details)"
+      NEMO_FAILED+=("$pkg")
+    fi
+  done
+
+  if (( ${#NEMO_FAILED[@]} > 0 )); then
+    warn "${#NEMO_FAILED[@]} NeMo dependency package(s) failed to install: ${NEMO_FAILED[*]}"
+    warn "ASR may not work until these are resolved manually."
+  fi
+fi
+
+echo "--- NeMo ASR import check ---"
+if "$VENV_PYTHON" -c "import nemo.collections.asr" >/dev/null 2>>"$SETUP_LOG"; then
+  log "PASS: nemo.collections.asr imports successfully."
+else
+  echo "[setup] FAIL: nemo.collections.asr could not be imported." >&2
+  echo "[setup] Full traceback logged to $SETUP_LOG — search for the last 'Traceback' entry." >&2
+  echo "[setup] ASR will not work until this is fixed, but the rest of setup will continue." >&2
 fi
 echo
 
