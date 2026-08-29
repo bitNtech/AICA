@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { arrayBufferToBase64, base64ToArrayBuffer, normalizeServerEvent } from '../testCallProtocol'
+import { normalizeServerEvent } from '../testCallProtocol'
 
 describe('normalizeServerEvent', () => {
   it('returns null for non-object input', () => {
@@ -11,30 +11,73 @@ describe('normalizeServerEvent', () => {
     expect(normalizeServerEvent({ type: 'something_new' })).toBeNull()
   })
 
-  it('falls back to asr_ready when capabilities is absent from a ready event', () => {
-    expect(normalizeServerEvent({ type: 'ready', asr_ready: true })).toEqual({
-      type: 'ready',
-      capabilities: { asr: true, llm: false, tts: false },
-      asrReady: true,
-    })
+  it('returns null for an event the panel intentionally ignores (e.g. asr_start)', () => {
+    expect(normalizeServerEvent({ type: 'asr_start', duration_ms: 400, language: 'ta' })).toBeNull()
   })
 
-  it('prefers an explicit capabilities object over asr_ready', () => {
+  it('normalizes a ready event from the backend\'s flat capability booleans', () => {
     expect(
-      normalizeServerEvent({ type: 'ready', asr_ready: false, capabilities: { asr: true, llm: true, tts: false } }),
+      normalizeServerEvent({
+        type: 'ready',
+        connection_id: 'abc-123',
+        asr_ready: true,
+        conversation_ready: true,
+        tts_ready: false,
+      }),
     ).toEqual({
       type: 'ready',
       capabilities: { asr: true, llm: true, tts: false },
-      asrReady: true,
+      connectionId: 'abc-123',
     })
   })
 
-  it('normalizes a user_transcript event', () => {
-    expect(normalizeServerEvent({ type: 'user_transcript', text: 'hello', final: true })).toEqual({
-      type: 'user_transcript',
-      text: 'hello',
-      final: true,
+  it('treats missing capability fields on ready as false', () => {
+    expect(normalizeServerEvent({ type: 'ready' })).toEqual({
+      type: 'ready',
+      capabilities: { asr: false, llm: false, tts: false },
+      connectionId: '',
     })
+  })
+
+  it('normalizes an interim partial_transcript event', () => {
+    expect(normalizeServerEvent({ type: 'partial_transcript', text: 'hel' })).toEqual({
+      type: 'partial_transcript',
+      text: 'hel',
+    })
+  })
+
+  it('normalizes a final transcript event', () => {
+    expect(normalizeServerEvent({ type: 'transcript', text: 'hello', language: 'ta' })).toEqual({
+      type: 'transcript',
+      text: 'hello',
+      language: 'ta',
+    })
+  })
+
+  it('normalizes agent_speaking_start with a null sample rate when TTS is not ready', () => {
+    expect(normalizeServerEvent({ type: 'agent_speaking_start', sample_rate: null })).toEqual({
+      type: 'agent_speaking_start',
+      sampleRate: null,
+    })
+  })
+
+  it('normalizes agent_speaking_start with a numeric sample rate', () => {
+    expect(normalizeServerEvent({ type: 'agent_speaking_start', sample_rate: 22050 })).toEqual({
+      type: 'agent_speaking_start',
+      sampleRate: 22050,
+    })
+  })
+
+  it('normalizes an agent_clause event', () => {
+    expect(normalizeServerEvent({ type: 'agent_clause', text: 'Vanakkam.' })).toEqual({
+      type: 'agent_clause',
+      text: 'Vanakkam.',
+    })
+  })
+
+  it('normalizes agent_interrupted and agent_speaking_end with no payload', () => {
+    expect(normalizeServerEvent({ type: 'agent_interrupted' })).toEqual({ type: 'agent_interrupted' })
+    expect(normalizeServerEvent({ type: 'agent_speaking_end' })).toEqual({ type: 'agent_speaking_end' })
   })
 
   it('normalizes error events with a message', () => {
@@ -42,13 +85,9 @@ describe('normalizeServerEvent', () => {
       type: 'protocol_error',
       message: 'bad frame',
     })
-  })
-})
-
-describe('base64 round-trip', () => {
-  it('recovers the original bytes', () => {
-    const original = new Uint8Array([0, 1, 2, 255, 128, 64]).buffer
-    const roundTripped = base64ToArrayBuffer(arrayBufferToBase64(original))
-    expect(new Uint8Array(roundTripped)).toEqual(new Uint8Array(original))
+    expect(normalizeServerEvent({ type: 'agent_error', message: 'LLM unavailable' })).toEqual({
+      type: 'agent_error',
+      message: 'LLM unavailable',
+    })
   })
 })

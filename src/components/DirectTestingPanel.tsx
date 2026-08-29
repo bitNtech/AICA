@@ -7,27 +7,35 @@ import { useAgentConfigStore } from '../store/agentConfig'
 import { useTestCallSocket, type ConnectionState } from '../lib/useTestCallSocket'
 import { isMicCaptureSupported, startMicCapture, type AudioCaptureHandle } from '../lib/audioCapture'
 import { ChunkedAudioPlayer } from '../lib/audioPlayback'
-import { base64ToArrayBuffer } from '../lib/testCallProtocol'
 import type { ServerEvent } from '../lib/testCallProtocol'
 
-type Speaker = 'admin' | 'agent'
+type Speaker = 'admin' | 'agent' | 'system'
 
 interface TestMessage {
   id: string
   speaker: Speaker
   text: string
-  /** Caller transcript still being spoken — rendered lighter, replaced in
-   * place once the backend marks it final. */
+  /** Still growing — a caller transcript mid-utterance, or an agent reply
+   * still receiving clauses. Rendered lighter, replaced in place once final. */
   interim?: boolean
 }
 
 const BACKEND_WS_URL = import.meta.env.VITE_BACKEND_WS_URL
+const BACKEND_WS_TOKEN = import.meta.env.VITE_BACKEND_WS_TOKEN
+
+// The backend's placeholder message while `backend/tts.py`'s real
+// svara-TTS model isn't wired in yet (see BACKEND_COMPLETION.md Sec3.2) —
+// it fires on every single agent turn by design, so it's surfaced once as
+// a banner (via the `tts` capability) instead of spamming a system bubble
+// per turn. Any other agent_error still shows inline.
+const TTS_UNAVAILABLE_MARKER = 'TTS model is unavailable'
 
 /** A one-on-one manual test call — the admin plays the caller (by typing or
  * speaking), sees the transcript, and gets a reply from the real agent
- * backend over `/ws/audio`. Response rendering branches on the backend's
- * declared capabilities (`ready.capabilities`) instead of assuming the full
- * ASR → LLM → TTS pipeline is live — see FRONTEND_IMPROVEMENTS.md §1.1. */
+ * backend over `/ws/audio`. UI branches on the backend's declared
+ * capabilities (derived from `ready`'s `asr_ready`/`conversation_ready`/
+ * `tts_ready`) instead of assuming the full ASR → LLM → TTS pipeline is
+ * live. */
 export function DirectTestingPanel({ onClose }: { onClose: () => void }) {
   const additionalContext = useAgentConfigStore((s) => s.additionalContext)
   const [startedAt] = useState(() => new Date().toISOString())
@@ -38,46 +46,102 @@ export function DirectTestingPanel({ onClose }: { onClose: () => void }) {
   const [micActive, setMicActive] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const interimIdRef = useRef<string | null>(null)
+  const callerInterimIdRef = useRef<string | null>(null)
+  const agentTurnIdRef = useRef<string | null>(null)
   const captureRef = useRef<AudioCaptureHandle | null>(null)
   const playerRef = useRef<ChunkedAudioPlayer | null>(null)
   const amplitudeRef = useRef(0)
 
-  const handleServerEvent = useCallback((event: ServerEvent) => {
-    switch (event.type) {
-      case 'user_transcript': {
-        setMessages((prev) => {
-          const id = interimIdRef.current
-          if (id) {
-            return prev.map((m) => (m.id === id ? { ...m, text: event.text, interim: !event.final } : m))
-          }
-          const newId = `caller-${Date.now()}`
-          if (!event.final) interimIdRef.current = newId
-          return [...prev, { id: newId, speaker: 'admin', text: event.text, interim: !event.final }]
-        })
-        if (event.final) interimIdRef.current = null
-        break
+  const upsertCallerBubble = useCallback((text: string, final: boolean) => {
+    setMessages((prev) => {
+      const id = callerInterimIdRef.current
+      if (id) {
+        return prev.map((m) => (m.id === id ? { ...m, text, interim: !final } : m))
       }
-      case 'agent_text':
-        setAgentTyping(false)
-        setMessages((prev) => [...prev, { id: `agent-${Date.now()}`, speaker: 'agent', text: event.text }])
-        break
-      case 'agent_audio_chunk':
-        if (!playerRef.current) playerRef.current = new ChunkedAudioPlayer()
-        playerRef.current.play(base64ToArrayBuffer(event.audioBase64))
-        break
-      case 'asr_error':
-      case 'pipeline_error':
-      case 'protocol_error':
-        setAgentTyping(false)
-        break
-      default:
-        break
-    }
+      const newId = `caller-${Date.now()}`
+      if (!final) callerInterimIdRef.current = newId
+      return [...prev, { id: newId, speaker: 'admin', text, interim: !final }]
+    })
+    if (final) callerInterimIdRef.current = null
   }, [])
 
+  const pushSystemMessage = useCallback((text: string) => {
+    setMessages((prev) => [...prev, { id: `system-${Date.now()}-${Math.random()}`, speaker: 'system', text }])
+  }, [])
+
+  const handleServerEvent = useCallback(
+    (event: ServerEvent) => {
+      switch (event.type) {
+        case 'partial_transcript':
+          upsertCallerBubble(event.text, false)
+          break
+        case 'transcript':
+          if (event.text) {
+            upsertCallerBubble(event.text, true)
+            setAgentTyping(true)
+          } else if (callerInterimIdRef.current) {
+            const id = callerInterimIdRef.current
+            setMessages((prev) => prev.filter((m) => m.id !== id))
+            callerInterimIdRef.current = null
+          }
+          break
+        case 'agent_speaking_start': {
+          setAgentTyping(false)
+          const newId = `agent-${Date.now()}`
+          agentTurnIdRef.current = newId
+          setMessages((prev) => [...prev, { id: newId, speaker: 'agent', text: '', interim: true }])
+          if (event.sampleRate) playerRef.current = new ChunkedAudioPlayer(event.sampleRate)
+          break
+        }
+        case 'agent_clause': {
+          const id = agentTurnIdRef.current
+          setMessages((prev) => {
+            if (!id) {
+              return [...prev, { id: `agent-${Date.now()}`, speaker: 'agent', text: event.text }]
+            }
+            return prev.map((m) => (m.id === id ? { ...m, text: m.text ? `${m.text} ${event.text}` : event.text } : m))
+          })
+          break
+        }
+        case 'agent_speaking_end': {
+          const id = agentTurnIdRef.current
+          if (id) setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, interim: false } : m)))
+          agentTurnIdRef.current = null
+          break
+        }
+        case 'agent_interrupted': {
+          const id = agentTurnIdRef.current
+          if (id) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === id ? { ...m, interim: false, text: `${m.text} …` } : m)),
+            )
+          }
+          agentTurnIdRef.current = null
+          break
+        }
+        case 'agent_audio_chunk':
+          if (!playerRef.current) playerRef.current = new ChunkedAudioPlayer()
+          playerRef.current.play(event.audio)
+          break
+        case 'agent_error':
+          setAgentTyping(false)
+          if (!event.message.includes(TTS_UNAVAILABLE_MARKER)) pushSystemMessage(event.message)
+          break
+        case 'asr_error':
+        case 'pipeline_error':
+        case 'protocol_error':
+          setAgentTyping(false)
+          pushSystemMessage(event.message)
+          break
+        default:
+          break
+      }
+    },
+    [upsertCallerBubble, pushSystemMessage],
+  )
+
   const { connectionState, capabilities, errorMessage, connect, disconnect, sendText, sendAudioChunk } =
-    useTestCallSocket({ url: BACKEND_WS_URL, onEvent: handleServerEvent })
+    useTestCallSocket({ url: BACKEND_WS_URL, token: BACKEND_WS_TOKEN, onEvent: handleServerEvent })
 
   useEffect(() => {
     connect()
@@ -93,12 +157,14 @@ export function DirectTestingPanel({ onClose }: { onClose: () => void }) {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, agentTyping])
 
+  const canSendText = connectionState === 'connected' && Boolean(capabilities?.llm)
+
   function send() {
     const text = draft.trim()
-    if (!text || connectionState !== 'connected') return
+    if (!text || !canSendText) return
     setMessages((prev) => [...prev, { id: `admin-${Date.now()}`, speaker: 'admin', text }])
     setDraft('')
-    if (capabilities?.llm) setAgentTyping(true)
+    setAgentTyping(true)
     sendText(text)
   }
 
@@ -151,6 +217,12 @@ export function DirectTestingPanel({ onClose }: { onClose: () => void }) {
         <p className="flex items-center gap-1.5 border-b border-hairline bg-canvas px-5 py-2 text-xs text-muted">
           <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0 text-amber" />
           Agent replies aren't connected yet — this session only proves out transcription.
+        </p>
+      )}
+      {connectionState === 'connected' && capabilities?.llm && !capabilities.tts && (
+        <p className="flex items-center gap-1.5 border-b border-hairline bg-canvas px-5 py-2 text-xs text-muted">
+          <AlertTriangleIcon className="h-3.5 w-3.5 shrink-0 text-amber" />
+          Voice synthesis isn't wired up in this backend build yet — agent replies are text-only.
         </p>
       )}
 
@@ -213,14 +285,14 @@ export function DirectTestingPanel({ onClose }: { onClose: () => void }) {
                   send()
                 }
               }}
-              disabled={connectionState !== 'connected'}
-              placeholder="Type what the caller would say…"
+              disabled={!canSendText}
+              placeholder={canSendText ? 'Type what the caller would say…' : 'Waiting for the agent backend…'}
               className="input flex-1 disabled:opacity-50"
             />
             <button
               type="button"
               onClick={send}
-              disabled={!draft.trim() || connectionState !== 'connected'}
+              disabled={!draft.trim() || !canSendText}
               aria-label="Send"
               className="btn-primary !rounded-full !p-2.5"
             >
@@ -289,6 +361,17 @@ function ConnectionStatus({
 }
 
 function ChatBubble({ msg }: { msg: TestMessage }) {
+  if (msg.speaker === 'system') {
+    return (
+      <div className="flex justify-center" role="alert">
+        <p className="flex items-center gap-1.5 rounded-full bg-critical/10 px-3 py-1 text-xs text-critical">
+          <AlertTriangleIcon className="h-3 w-3 shrink-0" />
+          {msg.text}
+        </p>
+      </div>
+    )
+  }
+
   const isAdmin = msg.speaker === 'admin'
   return (
     <div className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>

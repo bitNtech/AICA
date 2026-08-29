@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BackendCapabilities, ServerEvent } from './testCallProtocol'
-import { arrayBufferToBase64, normalizeServerEvent } from './testCallProtocol'
+import { normalizeServerEvent } from './testCallProtocol'
 
 export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 
 interface UseTestCallSocketOptions {
   url: string | undefined
+  /** Optional shared-secret token, sent as `?token=` on the handshake — see
+   * `AICA-backend/backend/settings.py`'s `SecuritySettings.ws_auth_token`.
+   * A WS client can't set a custom header, so the token travels as a query
+   * param. Leave unset when the backend has no `AUDIO_WS_AUTH_TOKEN`. */
+  token?: string
   language?: string
   onEvent?: (event: ServerEvent) => void
 }
@@ -20,13 +25,14 @@ interface UseTestCallSocketResult {
   sendAudioChunk: (pcm: ArrayBuffer) => void
 }
 
-/** Opens (and tears down) a WebSocket session against the backend's
- * `/ws/audio` contract: `call_started` on open, a typed stream of server
- * events back, `call_ended` on close. Connection lifecycle and declared
- * capabilities live here so `DirectTestingPanel` only has to render state,
- * not manage the socket. */
+/** Opens (and tears down) a WebSocket session against the backend's real
+ * `/ws/audio` contract: `call_started` on open, a typed stream of JSON
+ * server events back plus raw binary frames for TTS audio, `call_ended` on
+ * close. Connection lifecycle and declared capabilities live here so
+ * `DirectTestingPanel` only has to render state, not manage the socket. */
 export function useTestCallSocket({
   url,
+  token,
   language = 'ta',
   onEvent,
 }: UseTestCallSocketOptions): UseTestCallSocketResult {
@@ -61,14 +67,19 @@ export function useTestCallSocket({
     setErrorMessage(null)
     setCapabilities(null)
 
+    const target = token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
+
     let socket: WebSocket
     try {
-      socket = new WebSocket(url)
+      socket = new WebSocket(target)
     } catch {
       setConnectionState('error')
       setErrorMessage('Could not open a connection to the backend.')
       return
     }
+    // Binary frames (TTS audio) arrive as raw PCM16 bytes, not base64/JSON —
+    // ArrayBuffer is the cheapest form to hand straight to the audio player.
+    socket.binaryType = 'arraybuffer'
     socketRef.current = socket
 
     socket.onopen = () => {
@@ -85,9 +96,14 @@ export function useTestCallSocket({
     }
 
     socket.onmessage = (evt) => {
+      if (evt.data instanceof ArrayBuffer) {
+        onEventRef.current?.({ type: 'agent_audio_chunk', audio: evt.data })
+        return
+      }
+
       let parsed: ServerEvent | null = null
       try {
-        parsed = normalizeServerEvent(JSON.parse(evt.data))
+        parsed = normalizeServerEvent(JSON.parse(evt.data as string))
       } catch {
         return
       }
@@ -108,7 +124,7 @@ export function useTestCallSocket({
       socketRef.current = null
       setConnectionState((prev) => (prev === 'error' ? prev : 'closed'))
     }
-  }, [url, language])
+  }, [url, token, language])
 
   useEffect(() => disconnect, [disconnect])
 
@@ -118,10 +134,13 @@ export function useTestCallSocket({
     socket.send(JSON.stringify({ type: 'user_text', text }))
   }, [])
 
+  /** Sends raw PCM16 straight over the wire as a binary frame — the backend
+   * reads `message["bytes"]` directly off the socket, with no JSON envelope
+   * and no base64 encoding step. */
   const sendAudioChunk = useCallback((pcm: ArrayBuffer) => {
     const socket = socketRef.current
     if (!socket || socket.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: 'user_audio_chunk', audio: arrayBufferToBase64(pcm) }))
+    socket.send(pcm)
   }, [])
 
   return { connectionState, capabilities, errorMessage, connect, disconnect, sendText, sendAudioChunk }

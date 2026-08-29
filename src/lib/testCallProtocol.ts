@@ -1,9 +1,16 @@
 /**
- * The message contract for a manual test call over `/ws/audio`, per the
- * backend's documented event set (see BACKEND_COMPLETION.md in the backend
- * repo). Kept as a small discriminated union on both sides so a new backend
- * capability (e.g. TTS landing) is additive here, not a rewrite of the
- * panel's state machine.
+ * The message contract for a manual test call over the backend's real
+ * `/ws/audio` endpoint (see AICA-backend/backend/main.py — that file is the
+ * source of truth, not a separate spec doc). Kept as a small discriminated
+ * union on both sides so a new backend capability is additive here, not a
+ * rewrite of the panel's state machine.
+ *
+ * Two things make this contract unusual compared to a typical JSON-only WS:
+ * - Mic audio going up and TTS audio coming down are both raw binary WS
+ *   frames (signed 16-bit PCM), never base64-wrapped JSON.
+ * - `ready` reports capabilities as flat booleans (`asr_ready`,
+ *   `conversation_ready`, `tts_ready`), not a nested `capabilities` object —
+ *   normalized into one here so the rest of the app can treat it uniformly.
  */
 
 export interface BackendCapabilities {
@@ -12,7 +19,8 @@ export interface BackendCapabilities {
   tts: boolean
 }
 
-/** What the panel sends over the socket. */
+/** What the panel sends over the socket as JSON text frames. Raw mic audio
+ * is sent separately as binary frames — see `useTestCallSocket.sendAudioChunk`. */
 export type ClientEvent =
   | {
       type: 'call_started'
@@ -22,56 +30,72 @@ export type ClientEvent =
       language: string
     }
   | { type: 'user_text'; text: string }
-  | { type: 'user_audio_chunk'; audio: string }
   | { type: 'call_ended' }
 
-/** What the panel receives, normalized from whatever shape the backend
- * sends (see `normalizeServerEvent`). */
+/** What the panel receives as JSON text frames, normalized from the
+ * backend's actual event names (see `normalizeServerEvent`). Binary frames
+ * (TTS audio) are handled separately in `useTestCallSocket` and surfaced as
+ * a synthetic `agent_audio_chunk` event alongside these. */
 export type ServerEvent =
-  | { type: 'ready'; capabilities: BackendCapabilities; asrReady: boolean }
-  | { type: 'user_transcript'; text: string; final: boolean }
-  | { type: 'agent_text'; text: string }
-  | { type: 'agent_audio_chunk'; audioBase64: string; format: string }
-  | { type: 'vad_event'; speaking: boolean }
+  | { type: 'ready'; capabilities: BackendCapabilities; connectionId: string }
+  | { type: 'pipeline_configured'; language: string }
+  | { type: 'vad_start' }
+  | { type: 'vad_end'; reason: string }
+  | { type: 'partial_transcript'; text: string }
+  | { type: 'transcript'; text: string; language: string }
+  | { type: 'agent_speaking_start'; sampleRate: number | null }
+  | { type: 'agent_clause'; text: string }
+  | { type: 'agent_interrupted' }
+  | { type: 'agent_speaking_end' }
+  | { type: 'agent_audio_chunk'; audio: ArrayBuffer }
+  | { type: 'agent_error'; message: string }
   | { type: 'asr_error'; message: string }
   | { type: 'pipeline_error'; message: string }
   | { type: 'protocol_error'; message: string }
 
-/** The backend is being built in phases — today's `ready` event may not
- * even include `capabilities` yet. Treat missing fields as "not live" rather
- * than throwing, and accept both the documented `asr_ready` field name and a
- * capabilities-object form so this keeps working as the payload evolves. */
+/** Normalizes one JSON text frame from `/ws/audio` into a `ServerEvent`.
+ * Unknown/irrelevant types (e.g. `asr_start`, which the panel doesn't need)
+ * return null rather than throwing, so a future backend addition degrades
+ * gracefully instead of crashing the socket handler. */
 export function normalizeServerEvent(raw: unknown): ServerEvent | null {
   if (typeof raw !== 'object' || raw === null || !('type' in raw)) return null
   const data = raw as Record<string, unknown>
   const type = data.type
 
   switch (type) {
-    case 'ready': {
-      const caps = data.capabilities as Partial<BackendCapabilities> | undefined
-      const asr = caps?.asr ?? Boolean(data.asr_ready)
+    case 'ready':
       return {
         type: 'ready',
         capabilities: {
-          asr,
-          llm: caps?.llm ?? false,
-          tts: caps?.tts ?? false,
+          asr: Boolean(data.asr_ready),
+          llm: Boolean(data.conversation_ready),
+          tts: Boolean(data.tts_ready),
         },
-        asrReady: asr,
+        connectionId: String(data.connection_id ?? ''),
       }
-    }
-    case 'user_transcript':
-      return { type: 'user_transcript', text: String(data.text ?? ''), final: Boolean(data.final) }
-    case 'agent_text':
-      return { type: 'agent_text', text: String(data.text ?? '') }
-    case 'agent_audio_chunk':
+    case 'pipeline_configured':
+      return { type: 'pipeline_configured', language: String(data.language ?? '') }
+    case 'vad_start':
+      return { type: 'vad_start' }
+    case 'vad_end':
+      return { type: 'vad_end', reason: String(data.reason ?? '') }
+    case 'partial_transcript':
+      return { type: 'partial_transcript', text: String(data.text ?? '') }
+    case 'transcript':
+      return { type: 'transcript', text: String(data.text ?? ''), language: String(data.language ?? '') }
+    case 'agent_speaking_start':
       return {
-        type: 'agent_audio_chunk',
-        audioBase64: String(data.audio ?? ''),
-        format: String(data.format ?? 'pcm_s16le'),
+        type: 'agent_speaking_start',
+        sampleRate: typeof data.sample_rate === 'number' ? data.sample_rate : null,
       }
-    case 'vad_event':
-      return { type: 'vad_event', speaking: Boolean(data.speaking) }
+    case 'agent_clause':
+      return { type: 'agent_clause', text: String(data.text ?? '') }
+    case 'agent_interrupted':
+      return { type: 'agent_interrupted' }
+    case 'agent_speaking_end':
+      return { type: 'agent_speaking_end' }
+    case 'agent_error':
+      return { type: 'agent_error', message: String(data.message ?? 'Unknown agent error') }
     case 'asr_error':
     case 'pipeline_error':
     case 'protocol_error':
@@ -79,18 +103,4 @@ export function normalizeServerEvent(raw: unknown): ServerEvent | null {
     default:
       return null
   }
-}
-
-export function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return bytes.buffer
-}
-
-export function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  return btoa(binary)
 }
