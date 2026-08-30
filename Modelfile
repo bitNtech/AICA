@@ -16,3 +16,15 @@ FROM qwen3:4b-instruct-2507-q4_K_M
 
 PARAMETER num_ctx 8192
 PARAMETER temperature 0.3
+
+# NO num_gpu setting here, and that is deliberate - it was tried and reverted.
+#
+# Forcing all layers on (PARAMETER num_gpu 99) measured FASTER on a 13-token
+# prompt (34.5 vs 16.6 tok/s) and catastrophically SLOWER on the ~2.7k-token
+# prompt this backend actually sends: one turn took 114 SECONDS. On a 4GB card
+# the weights fit but the weights PLUS the KV cache for a real prompt do not,
+# and Windows WDDM does not fail that allocation - it silently spills to system
+# RAM over PCIe, which is far slower than leaving some layers on the CPU.
+#
+# Letting Ollama choose the split is better because it sizes the split against
+# num_ctx. Tune this only against a realistic prompt; a short one will lie.

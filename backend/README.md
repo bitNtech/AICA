@@ -98,7 +98,8 @@ TEN VAD and the turn-taking state machine use the hyperparameters the live-mic p
 | hop size | - | `256` (16 ms) | VAD frame size; TEN VAD is tuned around 16 ms frames. |
 | threshold | `VAD_THRESHOLD` | `0.35` | Speech-probability cutoff. Lower catches softer onsets but false-triggers on noise. |
 | pre-roll | `VAD_PRE_ROLL_FRAMES` | `8` (128 ms) | Silence buffered *before* VAD fires, prepended to the utterance so VAD onset lag does not clip the first syllable. |
-| endpoint silence | `VAD_ENDPOINT_SILENCE_FRAMES` | `30` (480 ms) | Consecutive silent frames that end a turn. Longer than a natural mid-sentence pause, so sentences are not cut in half. |
+| endpoint silence | `VAD_ENDPOINT_SILENCE_FRAMES` | `22` (352 ms) | Consecutive silent frames that end a turn. Longer than a natural mid-sentence pause, so sentences are not cut in half. |
+| barge-in gate | `VAD_BARGE_IN_FRAMES` | `15` (240 ms) | Continuous speech required before the caller cuts the agent off. One flagged frame is a cough, not an interruption; capture and ASR are unaffected. |
 | max utterance | `ASR_MAX_UTTERANCE_FRAMES` | `1875` (30 s) | Safety cap only, far past any real turn - a browser socket must not buffer unbounded audio. |
 | language | `ASR_LANGUAGE` (or `?lang=`) | `ta` | `language_id` passed to IndicConformer: `ta`, `hi`, `te`, `ml`, `kn`, `bn`, `mr`, `gu`, `pa`. |
 | decoder | `ASR_DECODING` | `rnnt` | `rnnt` is slower than `ctc` but more accurate on this hybrid model - correctness over latency. |

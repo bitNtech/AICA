@@ -179,8 +179,30 @@ def parse_flow_playbooks(master_prompt: str) -> dict[str, FlowPlaybook]:
 
 
 def _format_exemplars(exchanges: list[list[str]]) -> str:
+    """Render one flow's worked example, including its tool steps.
+
+    The third role, "tool", matters more than it looks. Without it an exemplar
+    reads as: caller gives a mobile number, then the agent says "ஒரு நிமிஷம்
+    சார், system-ல check பண்றேன்..." and immediately states an MRN and an
+    address. That is a demonstration of INVENTING a lookup result - the agent
+    narrates a database query and then produces the answer out of nowhere - and
+    a small model copies exactly that, calling no tool at all. Showing the
+    lookup as a step makes the example demonstrate the behaviour we want:
+    narrate, call the tool, then read back what the tool returned.
+    """
     lines = []
     for role, text in exchanges:
+        if role == "tool":
+            lines.append(f"[you call {text}]")
+            continue
+        # A "note" is a branch the example cannot show without being twice
+        # as long: the emergency exemplar has the caller give the address on
+        # the SECOND turn, so recited literally it makes the agent ask for an
+        # address the caller has already said. Bracketed like the tool steps,
+        # which the model has not been observed reading aloud.
+        if role == "note":
+            lines.append(f"[{text}]")
+            continue
         speaker = "CALLER" if role == "caller" else "YOU"
         lines.append(f"{speaker}: {text}")
     return "\n".join(lines)
@@ -256,6 +278,13 @@ class PromptBuilder:
                 "## HOW A REAL CALL SOUNDS — copy this register, not these facts",
                 "Never reuse a name, number or ID from this example. Match only the "
                 "language mix, the sentence length, and the one-question-per-turn pacing.",
+                # Observed on the 4B model: it read a CALLER line out of this block
+                # aloud as its own turn, and invented a child the caller had never
+                # mentioned because the example happened to be about one. The block
+                # has to say whose words are whose, not just "do not copy the facts".
+                "The CALLER lines are a different person in a different call. Never say a "
+                "CALLER line yourself, and never assume this caller has the same patient, "
+                "relative, test or problem as the example.",
                 exemplars,
             ]
 

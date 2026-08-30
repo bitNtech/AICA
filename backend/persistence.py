@@ -106,6 +106,53 @@ class CallEventStore:
             (connection_id, time.time(), str(event.get("type")), payload),
         )
 
+    def recent_calls(self, limit: int = 50) -> list[dict]:
+        """List calls newest-first, with a cheap per-call summary.
+
+        This is what turns the event log into a Call Log a dashboard can render
+        without downloading every call's full event stream (BACKEND_COMPLETION.md
+        Sec3.6). The counts and timings come from SQL aggregates rather than
+        from decrypting payloads, so this stays fast - and keeps working when
+        encryption is on, since event_type is deliberately stored alongside the
+        encrypted payload rather than inside it.
+        """
+        connection = sqlite3.connect(self.settings.db_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT c.connection_id, c.started_at, c.ended_at,
+                       COUNT(e.id),
+                       SUM(CASE WHEN e.event_type = 'transcript' THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN e.event_type = 'agent_clause' THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN e.event_type = 'agent_tool_call' THEN 1 ELSE 0 END)
+                FROM calls c
+                LEFT JOIN call_events e ON e.connection_id = c.connection_id
+                GROUP BY c.connection_id
+                ORDER BY c.started_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        except Exception:
+            logger.exception("call-event history read failed")
+            return []
+        finally:
+            connection.close()
+
+        return [
+            {
+                "connection_id": connection_id,
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "duration_seconds": round(ended_at - started_at, 3) if ended_at else None,
+                "event_count": event_count or 0,
+                "caller_turns": caller_turns or 0,
+                "agent_clauses": agent_clauses or 0,
+                "tool_calls": tool_calls or 0,
+            }
+            for connection_id, started_at, ended_at, event_count, caller_turns, agent_clauses, tool_calls in rows
+        ]
+
     def events_for_call(self, connection_id: str) -> list[dict]:
         """Read back one call's full event history, oldest first. For dashboards/tests, not the hot path."""
         connection = sqlite3.connect(self.settings.db_path)

@@ -302,13 +302,23 @@ class MockHospitalDb:
 
         if patient is None:
             return {"found": False}
-        return {
+        result = {
             "found": True,
             "mrn": patient["mrn"],
             "patient_name": patient["name"],
             "caller_mobile": patient["mobile"],
             "address": patient["address"],
         }
+        # Surface the patient's appointment_id when there is exactly one -
+        # otherwise a caller who never states an ID by name (nobody says
+        # "cancel APT-77219", they say "cancel my dermatology appointment")
+        # leaves cancelAppointment/rescheduleAppointment with nothing to call.
+        # Omitted, not guessed, when a patient has zero or several - picking
+        # among several would be inventing which one the caller means.
+        matches = [appt_id for appt_id, appt in self.appointments.items() if appt["mrn"] == patient["mrn"]]
+        if len(matches) == 1:
+            result["appointment_id"] = matches[0]
+        return result
 
     def verify_identity(
         self, *, mrn: str, dob: str | None = None, address_readback: str | None = None

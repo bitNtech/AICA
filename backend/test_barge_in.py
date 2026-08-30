@@ -104,3 +104,28 @@ if __name__ == "__main__":
         print("ok")
 
     asyncio.run(_main())
+
+
+def test_a_noise_blip_does_not_interrupt_but_a_spoken_word_does() -> None:
+    """The reported failure: any small sound near the mic stopped the agent."""
+    loop = asyncio.new_event_loop()
+    try:
+        speech = ActiveSpeech(sustained_frames=15)
+        task = loop.create_task(asyncio.sleep(60))
+        speech.set(task)
+
+        # A cough: two flagged 16 ms hops, then silence. Must not cancel.
+        assert speech.note_speech(True, speech_started=True) is False
+        assert speech.note_speech(True) is False
+        for _ in range(30):
+            assert speech.note_speech(False) is False
+        assert not task.cancelled() and not task.done()
+
+        # A real interjection: 15 continuous hops (240 ms) of speech.
+        results = [speech.note_speech(True, speech_started=i == 0) for i in range(15)]
+        assert results[-1] is True, "sustained speech must barge in"
+        assert results[:-1] == [False] * 14, "should fire exactly once"
+        loop.run_until_complete(asyncio.sleep(0))
+        assert task.cancelled()
+    finally:
+        loop.close()

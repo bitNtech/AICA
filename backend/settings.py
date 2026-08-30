@@ -36,9 +36,31 @@ class AudioSettings:
     # clip the first syllable.
     pre_roll_frames: int = int(os.getenv("VAD_PRE_ROLL_FRAMES", "8"))
 
-    # 30 x 16 ms = 480 ms - longer than a natural mid-sentence pause, so the
-    # ASR gets whole sentences instead of halves.
-    endpoint_silence_frames: int = int(os.getenv("VAD_ENDPOINT_SILENCE_FRAMES", "30"))
+    # 22 x 16 ms = 352 ms of trailing silence before the turn closes. This sits
+    # directly in front of every reply the caller hears - it is spent before the
+    # ASR has even started - so it is part of the latency budget, not free.
+    #
+    # Was 30 (480 ms). Lowered because 480 ms is past the point where a listener
+    # starts to feel talked-at-by-a-machine: human turn-taking gaps cluster
+    # around 200 ms. Not lowered further than 352 ms on purpose - below roughly
+    # 300 ms a natural mid-sentence breath starts closing the turn, and the ASR
+    # gets half a sentence, which costs far more than the 150 ms it saves.
+    #
+    # Raise it back with VAD_ENDPOINT_SILENCE_FRAMES if callers who pause to
+    # think are being cut off; that failure looks like the agent answering a
+    # question the caller had not finished asking.
+    endpoint_silence_frames: int = int(os.getenv("VAD_ENDPOINT_SILENCE_FRAMES", "22"))
+
+    # 15 x 16 ms = 240 ms of continuous speech before the caller is allowed to
+    # cut the agent off. Barging in on the first flagged hop meant any cough,
+    # keystroke or breath near the mic stopped the agent mid-sentence. A real
+    # interjection is a spoken word - several hundred ms - so it still lands
+    # promptly; noise blips are one or two hops and now pass under the gate.
+    #
+    # Lower it with VAD_BARGE_IN_FRAMES if interrupting feels sluggish; raise
+    # it in a noisy room. This gates ONLY the interrupt: the utterance is still
+    # captured and transcribed from its first frame either way.
+    barge_in_speech_frames: int = int(os.getenv("VAD_BARGE_IN_FRAMES", "15"))
 
     # ponytail: not in the reference CLI, which is a trusted local mic. A
     # browser socket is not: without a cap, a stuck speech flag buffers
@@ -75,7 +97,12 @@ class LlmSettings:
     one base-URL/model-name env var, without touching llm.py or conversation.py.
     """
 
-    base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:8001/v1")
+    # 127.0.0.1, never "localhost". Measured on this box: the same /api/chat
+    # request takes 2.10s via localhost and 0.05s via 127.0.0.1 - name
+    # resolution tries an address the server is not listening on and waits out
+    # a timeout first. That 2s is paid on EVERY LLM call, and a turn with a
+    # tool call makes several, so it dominated time-to-first-word.
+    base_url: str = os.getenv("LLM_BASE_URL", "http://127.0.0.1:8001/v1")
     api_key: str = os.getenv("LLM_API_KEY", "not-needed")
     model: str = os.getenv("LLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
 
@@ -164,13 +191,28 @@ class TtsSettings:
     # BACKEND_COMPLETION.md Sec3.5: same global-lock scaling problem as ASR,
     # for the same reason (GPU-bound synthesis) - bound it instead of
     # serializing every call's TTS work behind one mutex.
-    max_concurrency: int = int(os.getenv("TTS_MAX_CONCURRENCY", "2"))
+    #
+    # 4, not 2, because the DEFAULT engine is not GPU-bound at all: "edge" is a
+    # network round-trip (see tts.py), so this bounds sockets rather than
+    # compute, and main.py pipelines a turn's clauses through it to hide that
+    # latency. Lower it to 2 if TTS_ENGINE is switched to a local GPU model.
+    max_concurrency: int = int(os.getenv("TTS_MAX_CONCURRENCY", "4"))
+
+    # A healthy "edge" clause synthesizes in ~1s. Past this the endpoint is
+    # stalling, and the sender is holding every LATER clause's audio behind it
+    # (the queue is ordered), so one stuck clause mutes the rest of the turn.
+    # Measured with the endpoint unreachable: no timeout meant 21s per clause.
+    # The text has already gone out, so giving up here costs the voice for one
+    # clause and keeps the conversation moving.
+    timeout_seconds: float = float(os.getenv("TTS_TIMEOUT_SECONDS", "5"))
 
     def __post_init__(self) -> None:
         if self.language not in SUPPORTED_LANGUAGES:
             raise ValueError(f"Unsupported TTS_LANGUAGE: {self.language}")
         if self.max_concurrency <= 0:
             raise ValueError("TTS_MAX_CONCURRENCY must be positive")
+        if self.timeout_seconds <= 0:
+            raise ValueError("TTS_TIMEOUT_SECONDS must be positive")
         if self.engine not in {"edge", "svara"}:
             raise ValueError("TTS_ENGINE must be either 'edge' or 'svara'")
 

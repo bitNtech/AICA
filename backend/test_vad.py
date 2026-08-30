@@ -40,14 +40,16 @@ def test_readme_hyperparameters_are_the_defaults() -> None:
     settings = AudioSettings()
     assert (settings.sample_rate, settings.vad_hop_size) == (16_000, 256)
     assert settings.vad_threshold == 0.35
-    assert settings.endpoint_silence_frames == 30
+    # 22 x 16 ms = 352 ms. Lowered from 30 (480 ms): this silence is spent
+    # in front of every reply, so it is part of the latency budget.
+    assert settings.endpoint_silence_frames == 22
     assert settings.pre_roll_frames == 8
     assert (settings.language, settings.decoding) == ("ta", "rnnt")
 
 
 def test_pre_roll_is_prepended_to_utterance() -> None:
     pre_roll = 3
-    silence = 30
+    silence = AudioSettings().endpoint_silence_frames
     flags = [0, 0, 0, 1] + [0] * silence
     segmenter = _make_segmenter(flags, pre_roll_frames=pre_roll)
 
@@ -60,19 +62,22 @@ def test_pre_roll_is_prepended_to_utterance() -> None:
 
 
 def test_mid_sentence_pause_shorter_than_endpoint_does_not_split() -> None:
-    # 10 silent frames (160 ms) is a pause, not a turn end at 30 frames.
-    flags = [1] + [0] * 10 + [1] + [0] * 30
+    # 10 silent frames (160 ms) is a breath, not a turn end - it must stay
+    # comfortably under endpoint_silence_frames or the ASR gets half a
+    # sentence, which is the failure that caps how low that can be tuned.
+    endpoint = AudioSettings().endpoint_silence_frames
+    flags = [1] + [0] * 10 + [1] + [0] * endpoint
     segmenter = _make_segmenter(flags)
 
     update = _run(segmenter, flags)
 
     assert update is not None and update.samples is not None
-    assert len(update.samples) == (1 + 10 + 1 + 30) * HOP
+    assert len(update.samples) == (1 + 10 + 1 + endpoint) * HOP
 
 
 def test_short_blip_is_still_transcribed() -> None:
     # The reference pipeline has no minimum-speech gate: every turn goes to ASR.
-    flags = [1, 1] + [0] * 30
+    flags = [1, 1] + [0] * AudioSettings().endpoint_silence_frames
     segmenter = _make_segmenter(flags)
 
     update = _run(segmenter, flags)
@@ -113,7 +118,7 @@ def test_peek_utterance_returns_speech_so_far_without_consuming_it() -> None:
 
 
 def test_peek_utterance_is_none_again_once_the_turn_ends() -> None:
-    flags = [1, 1] + [0] * 30
+    flags = [1, 1] + [0] * AudioSettings().endpoint_silence_frames
     segmenter = _make_segmenter(flags)
     _run(segmenter, flags)
 

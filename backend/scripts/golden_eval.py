@@ -14,9 +14,11 @@ Like smoke_llm.py/interactive_llm.py, this is a manual/dev script, NOT a
 pytest test - it needs a real or locally-served OpenAI-compatible
 LLM_BASE_URL to produce a meaningful run and is not meant for CI. It imports
 and uses ConversationManager/LlmClient/tools exactly as they exist today,
-reusing smoke_llm.py's _LoggingLlmClient logging shim and SAMPLE_METADATA
-caller identity (see backend/scripts/interactive_llm.py for the same import
-pattern).
+reusing smoke_llm.py's _LoggingLlmClient logging shim (see
+backend/scripts/interactive_llm.py for the same import pattern).
+
+Each flow starts with NOTHING known but the agent's own name, so the agent has
+to work the flow rather than assume it - see run_flow().
 
 IMPORTANT - this is a heuristic signal only, not a strict pass/fail gate.
 A small/weak local LLM (or one running on modest hardware) may legitimately
@@ -247,16 +249,17 @@ class FlowResult:
 async def run_flow(spec: FlowSpec, manager: ConversationManager, llm) -> FlowResult:
     """Replay one flow's caller turns and report which tools fired.
 
-    Starts a fresh call session using smoke_llm.py's SAMPLE_METADATA as a
-    sane default caller identity (these mock flows all reference the same
-    seeded patient in tools.py's MockHospitalDb - Murugesan/ARV-118342/
-    9840721534 - where that fits the scenario; it's fine if some flows don't
-    match exactly, this harness observes behaviour, it does not guarantee a
-    match), then feeds each caller turn through handle_utterance() in order,
-    collecting every tool-call name that fired anywhere in the transcript.
+    Starts the call with NOTHING known but the agent's own name - deliberately.
+    An earlier version seeded the session with smoke_llm.py's SAMPLE_METADATA,
+    which pre-filled the caller's MRN, name and mobile into the ledger. That
+    made this a much weaker gate than it looked: the agent already "knew" the
+    identity, so lookupPatient and verifyIdentity had no reason to fire, and a
+    model that never called an identity tool still looked fine. A real inbound
+    call knows the caller's number at best. Starting blank is what forces the
+    flow to be worked rather than assumed.
     """
     connection_id = f"golden-flow-{spec.flow_number:02d}"
-    manager.start_call(connection_id, **SAMPLE_METADATA)
+    manager.start_call(connection_id, agent_name=SAMPLE_METADATA["agent_name"])
 
     for turn_text in spec.caller_turns:
         print(f"\n--- flow {spec.flow_number:02d} caller turn ---\n{turn_text}")

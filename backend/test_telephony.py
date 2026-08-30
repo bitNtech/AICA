@@ -27,7 +27,7 @@ import numpy as np
 
 from . import telephony as telephony_module
 from .conversation import ConversationManager
-from .llm import LlmReply
+from .llm import LlmReply, ReplyComplete, TextDelta
 from .persistence import CallEventStore
 from .settings import AudioSettings, ConversationSettings, PersistenceSettings, SecuritySettings
 from .telephony import router
@@ -44,6 +44,13 @@ class _ScriptedLlm:
     def __init__(self, replies: list[LlmReply]) -> None:
         self._replies = list(replies)
         self.calls: list[list[dict]] = []
+
+    async def stream(self, messages: list[dict], tools: list[dict]):
+        self.calls.append([dict(m) for m in messages])
+        reply = self._replies.pop(0)
+        for index in range(0, len(reply.content), 7):
+            yield TextDelta(reply.content[index : index + 7])
+        yield ReplyComplete(reply)
 
     async def complete(self, messages: list[dict], tools: list[dict]) -> LlmReply:
         self.calls.append([dict(m) for m in messages])
@@ -210,7 +217,11 @@ def test_media_stream_drives_asr_conversation_tts_and_stop_cleans_up(monkeypatch
     transcript_text = "எனக்கு appointment வேணும்"
     # 3 speech frames then enough trailing silence to close the VAD turn
     # (default endpoint_silence_frames=30, matching test_vad.py's pattern).
-    flags = [1, 1, 1] + [0] * 30
+    # Silence tail read from settings, not hard-coded: the segmenter closes
+    # the turn after endpoint_silence_frames of silence, so a literal 30
+    # here silently stops matching the moment that value is tuned.
+    speech_frames = 3
+    flags = [1] * speech_frames + [0] * AudioSettings().endpoint_silence_frames
 
     app, db_path = _build_app(
         llm_replies=[LlmReply(content=reply_text)],

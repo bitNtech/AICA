@@ -25,6 +25,8 @@ from __future__ import annotations
 import contextlib
 import json
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +34,7 @@ from fastapi.testclient import TestClient
 
 from . import vad as vad_module
 from .conversation import ConversationManager
-from .llm import LlmReply
+from .llm import LlmReply, ReplyComplete, TextDelta
 from .main import app
 from .persistence import CallEventStore
 from .settings import AudioSettings, ConversationSettings, PersistenceSettings, SecuritySettings
@@ -73,11 +75,29 @@ class _FakeTts:
 class _ScriptedLlm:
     """Same pattern as test_conversation.py's fake - scripted replies, no network."""
 
+    ready = True
+
     def __init__(self, replies: list[LlmReply]) -> None:
         self._replies = list(replies)
 
+    async def stream(self, messages, tools, max_tokens=None):
+        # ConversationManager.prewarm() asks for a single token purely to make
+        # the server evaluate the prompt into its cache, and throws the output
+        # away. Modelled here so a prewarm does not silently eat the reply the
+        # test scripted for the caller's actual turn.
+        if max_tokens == 1:
+            yield ReplyComplete(LlmReply(content=""))
+            return
+        reply = self._replies.pop(0)
+        for index in range(0, len(reply.content), 7):
+            yield TextDelta(reply.content[index : index + 7])
+        yield ReplyComplete(reply)
+
     async def complete(self, messages, tools) -> LlmReply:
-        return self._replies.pop(0)
+        async for event in self.stream(messages, tools):
+            if isinstance(event, ReplyComplete):
+                return event.reply
+        raise AssertionError("scripted stream produced no ReplyComplete")
 
 
 class _FakeTenVad:
@@ -265,6 +285,68 @@ def test_user_text_drives_a_conversation_turn_without_audio() -> None:
     clause_texts = [e["text"] for e in turn if e["type"] == "agent_clause"]
     assert "".join(clause_texts)
     assert tts.calls, "the LLM's reply to typed input should have been synthesized"
+
+
+class _OverlapTrackingTts:
+    """Records the high-water mark of concurrent synthesize() calls.
+
+    synthesize() is dispatched through asyncio.to_thread, so these run on
+    worker threads and the counter needs a lock. The sleep is what gives a
+    second clause the chance to start before the first has finished - without
+    it every call would complete too fast for an overlap to be observable
+    either way, and the test would pass whether or not the pipeline works.
+    """
+
+    def __init__(self) -> None:
+        self.ready = True
+        self.sample_rate = 22_050
+        self.calls: list[str] = []
+        self.max_concurrent = 0
+        self._active = 0
+        self._lock = threading.Lock()
+
+    def synthesize(self, text: str, language: str):
+        with self._lock:
+            self._active += 1
+            self.max_concurrent = max(self.max_concurrent, self._active)
+            self.calls.append(text)
+        time.sleep(0.15)
+        with self._lock:
+            self._active -= 1
+        from .tts import SynthesisResult
+
+        return SynthesisResult(samples=np.array([1, 2, 3], dtype=np.int16), sample_rate=self.sample_rate)
+
+
+def test_clauses_are_synthesized_concurrently_not_one_after_another() -> None:
+    """The gap the caller hears between sentences is a whole TTS round-trip.
+
+    Each clause used to be synthesized only after the previous one had been
+    sent, so a three-sentence reply cost three sequential round-trips and the
+    default engine is a network call (849ms-10.8s measured). Overlapping them
+    is what makes the agent's speech continuous, and nothing else in the suite
+    would notice if that overlap were lost - the audio still arrives, just
+    seconds late, which no assertion on message CONTENT can see.
+    """
+    tts = _OverlapTrackingTts()
+    llm = _ScriptedLlm([LlmReply(content="ஒன்று சொல்றேன். ரெண்டு சொல்றேன். மூணு சொல்றேன்.")])
+    _set_app_state(tts=tts, llm=llm)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/audio") as ws:
+        _next_json(ws)  # ready
+        ws.send_json(_VALID_CALL_STARTED)
+        _next_json(ws)  # pipeline_configured
+        _drain_agent_turn(ws)  # greeting
+
+        ws.send_json({"type": "user_text", "text": "சொல்லுங்க"})
+        _drain_agent_turn(ws)
+
+    assert len(tts.calls) >= 2, f"expected a multi-clause reply, synthesized {tts.calls}"
+    assert tts.max_concurrent > 1, (
+        "clauses were synthesized strictly one after another - the caller hears "
+        "one full TTS round-trip of silence between every sentence"
+    )
 
 
 def test_blank_user_text_does_not_trigger_a_conversation_turn() -> None:

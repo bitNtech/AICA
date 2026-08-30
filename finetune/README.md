@@ -135,7 +135,7 @@ Edit `.env` in the repo root:
 LLM_MODEL=aruvi-ft
 ```
 
-`LLM_BASE_URL` stays as it is (`http://localhost:11434/v1`). Restart the
+`LLM_BASE_URL` stays as it is (`http://127.0.0.1:11434/v1`). Restart the
 backend. `finetune/Modelfile` sets `num_ctx 8192`, which comfortably holds the
 condensed runtime prompt plus a full call's history; the old 32768 allocated a
 KV cache far too large for a 4 GB card.

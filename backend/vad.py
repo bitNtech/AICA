@@ -20,6 +20,7 @@ from .settings import AudioSettings
 @dataclass(frozen=True)
 class VadUpdate:
     probability: float
+    speech_frame: bool = False
     speech_started: bool = False
     speech_ended: bool = False
     end_reason: str | None = None
@@ -52,7 +53,7 @@ class TenVadSegmenter:
             self._utterance.append(frame.copy())
             if len(self._utterance) >= self.settings.max_utterance_frames:
                 return self._finish(probability, "max_duration")
-            return VadUpdate(probability=probability, speech_started=started)
+            return VadUpdate(probability=probability, speech_frame=True, speech_started=started)
 
         if not self._in_speech:
             self._pre_roll.append(frame.copy())

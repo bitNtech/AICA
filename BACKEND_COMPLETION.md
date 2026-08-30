@@ -13,34 +13,89 @@ Patient speaks Tamil -> Streaming STT -> LLM (Llama 3.1 8B / Qwen2.5-7B) -> stre
 
 ## 1. What's actually in the repo today
 
+**This section was rewritten on 2026-08-30 after an audit.** The version it replaces
+described the conversation manager, LLM client, tool layer, TTS, persistence and
+telephony adapter as "Missing entirely". All of them existed and were tested. Treat the
+rest of this document as a design log, not a status report.
+
 | Stage in the target flow | Status | Evidence |
 |---|---|---|
-| Browser mic capture, 16 kHz PCM | Done | `legacy_test_client/audio-stream.js`, `legacy_test_client/index.html` |
+| Browser mic capture, 16 kHz PCM | Done | `legacy_test_client/`, `backend/console.html` |
 | WebSocket transport | Done | `backend/main.py` `/ws/audio` |
-| VAD / turn segmentation | Done, well tested | `backend/vad.py` (TEN VAD), `test_vad.py` (6 tests, all state-machine branches covered) |
-| Streaming STT | Partial | `backend/asr.py` -> AI4Bharat IndicConformer, but **not streaming**: it waits for `vad_end` (full utterance) then runs one batch `transcribe()` call. This is "utterance-final STT", not "streaming STT" as the flow specifies. |
-| **Conversation Manager (master prompt + state/ledger)** | Missing entirely | No code references `golden/main_prompt.txt`. It exists only as a design artifact. |
-| **LLM (Llama 3.1 8B / Qwen2.5-7B, streaming)** | Missing entirely | No LLM client, no model server config, nothing downstream of `transcript` event. |
-| **Tool calling** (`lookupPatient`, `bookAppointment`, `dispatchAmbulance`, etc. — 22 tools listed in the prompt) | Missing entirely | No tool layer, no mock/real CRM, no DB. |
-| **svara-TTS (streaming, cloned voice)** | Missing entirely | No TTS client, no voice asset, no audio-out path at all. |
-| **8 kHz PCM resampling for telephony** | Missing entirely | Everything in the repo is 16 kHz, browser-only. |
-| **SIP / WebRTC -> real phone line** | Missing entirely | The only transport is a raw browser `WebSocket`. There is no SIP trunk, no PBX/media-server integration, no way for an actual phone call to reach this pipeline. |
-| Barge-in (caller interrupts AICA mid-sentence) | Missing entirely | No concept of an active TTS stream to cancel; VAD only feeds ASR, not an interrupt signal to a (non-existent) speaking agent. |
-| Golden-flow evaluation harness | Missing entirely | `golden/flows/*.txt` (20 flows) and `golden/main_prompt.txt` are unused reference/eval data — no script consumes them. |
-| Observability / call events for a dashboard | Partial | Rich structured WS events exist (`ready`, `vad_start`, `vad_end`, `asr_start`, `transcript`, `asr_error`) but nothing persists them (no DB, no log sink), so there is no call history for the frontend's Call Log / Dashboard to read. |
+| VAD / turn segmentation | Done | `backend/vad.py` (TEN VAD), `test_vad.py` |
+| Streaming STT | Done | `backend/asr.py` — RNNT for the final transcript at `vad_end`, plus throttled CTC `transcribe_partial` for interim `partial_transcript` events while the caller is still speaking (§3.4 option 2). Verified end to end by `backend/scripts/e2e_check.py`. |
+| Conversation Manager (prompt + ledger) | Done | `backend/conversation.py`, `backend/prompt_builder.py`. The full 15k-token spec is **not** sent per turn: `runtime_core.txt` plus one section-8 playbook plus that flow's exemplars, ~2.5k tokens. |
+| LLM (OpenAI-compatible, streaming) | Done | `backend/llm.py`. `stream()` yields text deltas; `complete()` is a wrapper over it. |
+| Tool calling (22 tools) | Done | `backend/tools.py` against `MockHospitalDb`. `hangUp`/`transferCall` now drive real call control rather than just returning a dict. |
+| TTS (streaming, clause-chunked) | Done, different engine | `backend/tts.py`. `TTS_ENGINE=edge` (Microsoft neural Tamil) is the working default; `svara` remains an unimplemented placeholder — no public reference exists. Clauses are synthesized as the LLM stream closes them, so audio starts before the turn finishes. |
+| Barge-in | Done | `backend/barge_in.py` + `queue_segment` in `main.py`. Cancelling now also cancels the LLM generation, and the truncated turn is recorded so the model knows what the caller actually heard. |
+| 8 kHz resampling for telephony | Done | `backend/audio_transcode.py`, used by the telephony leg on both directions. |
+| SIP / WebRTC to a real phone | Adapter only, **out of scope** | `backend/telephony.py` is a code-complete, unit-tested Twilio-Media-Streams-shaped adapter that has never been connected to a trunk. Live telephony is explicitly out of scope; testing is manual through the console. |
+| Golden-flow evaluation | Done | `backend/scripts/golden_eval.py` (tool correctness over the 20 flows), `register_eval.py` (register + grounding on **unseen** scenarios), `safety_eval.py` (the three clinical refusals under escalating pressure), `e2e_check.py` (a running server, spoken + typed). Run the first two with `LLM_TEMPERATURE=0`: at the 0.3 default a 14-turn register_eval run varies by 4 turns between runs of the *same* prompt, which is wider than any prompt change measured so far. |
+| Persistence / call history | Done | `backend/persistence.py` (SQLite, optional Fernet encryption) plus `GET /api/calls`, `GET /api/calls/{id}`, `GET /api/health`. Writes go through a background queue so a disk write can never stall speech. |
+| Grounding enforcement | **New, not in the original plan** | `backend/grounding.py`. See below. |
 
-**Bottom line:** the backend is a solid, well-tested **speech-to-text front half** of the pipeline
-(WS -> VAD -> ASR). Everything after "get a Tamil transcript" — which is most of the product —
-does not exist yet. It is *not* an "incomplete but broadly-there" backend; it is roughly the
-first 25% of the diagram, built to a high standard, with the remaining 75% still to design.
+### What the audit actually found broken
 
-### Code-quality notes on what exists (keep this standard for new code)
-- `settings.py` centralizes tunables via env vars with clear comments on *why* each default was chosen — keep this pattern for LLM/TTS config.
-- `vad.py` / `asr.py` are cleanly separated, unit-tested with fakes/stubs (no GPU/model needed to test logic) — replicate this for the LLM and TTS adapters (inject a fake client, test orchestration logic without hitting a real model).
-- `main.py`'s per-connection state (queues, locks, `asyncio.to_thread` for blocking model calls) is a reasonable pattern to extend, **but** it currently holds one global `asr_lock` — see §3.4, this will not scale to concurrent calls once GPU-bound LLM/TTS calls are added.
-- Python is pinned to 3.10/3.11 solely because of the NeMo/AI4Bharat fork. This constraint will ripple into every new dependency choice (see §5).
+1. **The ledger never reached the prompt.** `session.ledger` accumulated `mrn`,
+   `patient_name` and `caller_mobile` from tool results, but the system prompt rendered
+   its KNOWN FACTS block from `session.metadata`, so every slot stayed blank for the whole
+   call. Since the prompt says "a blank value means it is not yet known — discover it
+   normally", it was actively instructing the model to re-ask for facts the server already
+   held — defeating the central "never re-ask" rule. The prompt is now rendered from the
+   live ledger, and refreshed *inside* the tool loop, because the iteration right after
+   `lookupPatient` is the first consumer of what it returned.
+2. **ASR could not load at all.** `pip install -e ./NeMo_ai4bharat --no-deps` skips
+   NeMo's own dependencies, and `requirements.txt` was missing `librosa`, `sentencepiece`
+   and `jiwer`. The server started fine and reported `asr_ready: false`, which reads like
+   a model-access problem rather than a missing package. The microphone path had never
+   run end to end; it does now.
+3. **`pytest` at the repo root failed**, walking into the vendored NeMo checkout and dying
+   collecting its suite. Fixed with `testpaths`.
+4. **`hangUp` did nothing.** The agent said goodbye and the socket stayed open.
+5. **Persistence sat on the critical path** — a SQLite write between every clause and the
+   next synthesis.
+6. **Teardown truncated the call log**, cancelling workers the instant a socket dropped,
+   which reliably lost the end of the turn — the part worth recording.
+7. **The few-shot exemplars were the mock DB record.** `appointment.book` used
+   Murugesan / ARV-118342 / 9840721534, the exact seeded patient. A small model parrots
+   the exemplar instead of calling `lookupPatient`, and the answer looks right. Exemplar
+   facts are now disjoint from the database (enforced by a test), so a copied fact is a
+   *wrong* fact — which is what makes the grounding check below able to catch it.
 
----
+### Grounding (new)
+
+The prompt forbids inventing an ID. Nothing checked whether the model complied, and it
+does not: observed on a 3B model, the agent said "ஒரு நிமிஷம் சார், system-ல check
+பண்றேன்..." and read back an MRN lifted from its own exemplars, having called no tool.
+`backend/grounding.py` compares every structured ID and phone number the agent says
+against the tool results, the caller's turns and the ledger — deliberately **not** the
+system prompt, since that is where the exemplars live. Anything unaccounted for is
+logged, emitted as a `grounding_warning` event, shown in the console, and counted by
+`register_eval`.
+
+It reports rather than filters: by the time a clause is checked it has already been
+streamed to the caller, and withholding half a sentence would be worse than the fault.
+
+`grounding.py` also checks a second, worse class of claim: an action the agent says it
+has **completed** with no tool call behind it. Given a chest-pain call and an address the
+agent says "Ambulance அனுப்பிட்டேன், இப்பவே கிளம்பிடுச்சு" — *I have sent an ambulance,
+it has left* — and calls nothing. There is no invented identifier in that sentence for
+the check above to see, and it is worse than a wrong MRN, because the caller stops
+looking for help. Three separate prompt fixes failed to make `dispatchAmbulance` fire
+(see LLM_TEST_RESULTS.txt §7.3), so it is now detected and surfaced as an
+`action_claim_warning` event rather than trusted to the prompt. **Still open:** the agent
+does not dispatch. Making it dispatch means a deterministic server-side call once an
+emergency is detected and an address is known — a product decision, since it would
+dispatch on an address the model believes it heard.
+
+### The binding constraint is model quality, not plumbing
+
+On CPU with `qwen2.5:3b` the agent produces degenerate repetition and never calls a
+tool. `qwen3:4b-instruct-2507-q4_K_M` holds the register and answers correctly from the
+standing facts. `register_eval` on seven unseen scenarios is the number to watch; the
+emergency override generalises (an emergency stated mid-billing correctly abandons the
+billing flow and takes the address first), while turn discipline is the weakest area.
 
 ## 2. Target architecture (fills the gap)
 
@@ -211,49 +266,39 @@ container so ASR isn't blocking your choice of LLM/TTS/SIP tooling versions. Run
 own container and everything else in a modern Python (3.12+) container is probably the pragmatic
 answer rather than fighting the NeMo pin project-wide.
 
-## 6. Suggested delivery order
-1. Conversation Manager + LLM (mock tools first, in-process ledger) — get a **text-only** chat
-   loop working end-to-end against the golden flows before touching audio.
-2. Streaming TTS wired to the browser WS output (still browser-only, no SIP yet) — now you have
-   the full voice-in/voice-out loop the reference diagram shows, in the browser.
-3. Barge-in handling.
-4. Persistence + golden-flow eval harness (lock in quality before scaling out).
-5. SIP/WebRTC telephony gateway + 8kHz resampling — this is the step that turns it from a browser
-   demo into an actual phone-answering system.
-6. Concurrency/scaling rework (worker pools, move off the global `asr_lock`).
-7. Security hardening pass before any production phone number is live.
+## 6. Delivery status
 
----
+1. ~~Conversation Manager + LLM (mock tools, in-process ledger), text-only loop~~ — **done.**
+   The ledger is now actually rendered into the prompt, which it was not before (see §1).
+2. ~~Streaming TTS wired to the browser WS output~~ — **done**, and upgraded past the
+   original plan: the LLM is consumed as a token stream and each clause is synthesized as
+   it closes, so audio starts before the turn finishes rather than after.
+3. ~~Barge-in~~ — **done.** Cancelling now also cancels the LLM generation, and the
+   truncated turn is written back to history so the model knows what the caller heard.
+4. ~~Persistence + golden-flow eval harness~~ — **done**, plus `GET /api/calls` /
+   `/api/calls/{id}` / `/api/health`, and `e2e_check.py` which drives a running server
+   with synthesized caller speech.
+5. SIP/WebRTC telephony gateway — **out of scope.** `backend/telephony.py` remains a
+   code-complete, unit-tested adapter; nothing connects it to a trunk, and nothing should
+   until the items below are settled. Testing is manual, through the console.
+6. Concurrency/scaling rework — bounded semaphore pools are in; not load-tested.
+7. Security hardening — the WS auth token and at-rest encryption exist and are off by
+   default. Both must be on before any real number is live.
 
-## Progress log
+### What is genuinely still open
 
-- **Item 1 (Conversation Manager + LLM, text-only, mock tools) — done, commit `0875dfa`.**
-  `backend/llm.py` (streaming OpenAI-compatible client), `backend/tools.py` (all 22 tools from
-  `golden/main_prompt.txt` Sec10, mock hospital DB), `backend/conversation.py` (prompt templating,
-  per-connection ledger, LLM<->tool-call loop). Deliberately not wired into `main.py` yet, per
-  the Sec6 delivery order - that lands with item 2.
-
-- **Item 2 (streaming TTS wired to the browser WS output) — done, commits `b36c64c`, `e227a13`,
-  `edbdeb1`.** `backend/tts.py` (`SvaraTts` adapter - `load()` is a placeholder, real model load
-  deliberately deferred, see Sec3.2), `backend/clause_chunker.py` (sentence/clause-boundary
-  splitting, Tamil/English abbreviation-aware), and `main.py` wiring: `capture_browser_audio` now
-  routes each transcript through `ConversationManager.handle_utterance()` then `speak()`, which
-  chunks the reply into clauses and synthesizes+sends each over the same WS as new
-  `agent_speaking_start` / `agent_clause` / `agent_speaking_end` events. Full-reply-then-chunk for
-  v1, not token-level LLM streaming into TTS - a legitimate scope cut per Sec3.2, not silently
-  shipped. TTS/ASR each still gated behind one global `app.state.tts_lock` / `asr_lock` - the
-  Sec3.5 concurrency rework (item 6) is what removes that.
-
-- **Item 3 (barge-in handling) — done.** `backend/barge_in.py`'s `ActiveSpeech` tracks whichever
-  `speak()` task is currently synthesizing/sending audio; `main.py`'s `queue_segment()` cancels it
-  the instant a fresh `vad_start` fires mid-speech, and `speak()` catches the resulting
-  `CancelledError` around its per-clause loop, sends a new `agent_interrupted` event instead of
-  `agent_speaking_end`, and returns - no further clause is ever synthesized or sent once cancelled.
-  Scoped to TTS/audio-out only, per Sec3.2: barging in while the LLM is still generating the
-  *previous* reply (agent hasn't started speaking yet) is unaffected, and an interrupted turn's
-  full reply text still lands in `session.messages` as if said in full (not truncated to "only
-  what was audibly played") - both are deliberate v1 simplifications, not oversights.
-  `ActiveSpeech` has full unit coverage (`test_barge_in.py`); the `main.py` wiring itself has no
-  direct test, consistent with `main.py` having no unit tests at all today - **known gap:** a
-  dedicated `test_main.py` integration-test pass (FastAPI `TestClient` + stubbed
-  asr/llm/tts/conversation) is planned as its own item once items 3-7 are all done, not before.
+- **Model quality.** This is now the binding constraint, not the plumbing. Turn
+  discipline (one question per turn) and English-caller mirroring are the weakest areas;
+  `register_eval` scores them on unseen scenarios and is the number to watch.
+- **Safety refusals now have an eval, not yet a verdict.**
+  `backend/scripts/safety_eval.py` puts escalating pressure on the three
+  highest-consequence behaviours — refusing to read or grade a lab value, refusing to
+  name or rule out a diagnosis, refusing to authorise aspirin during chest pain — and its
+  detectors are unit-tested in both directions. What it cannot do is read Tamil: a
+  violation it reports is real, but silence means only that nothing obviously wrong was
+  said, so a native reader still has to read the transcripts.
+- **A self-hosted TTS engine.** `TTS_ENGINE=edge` sends the text to be spoken to
+  Microsoft. Acceptable for the fictional Aruvi data, not for real patient speech.
+- **Grounding covers identifiers only.** `backend/grounding.py` can decide whether an ID
+  or phone number was invented. It cannot check an invented doctor name, price, room or
+  date — those still rest on the prompt alone.

@@ -12,24 +12,36 @@
     "same bad text extraction that ruined golden/flows/*.txt (missing combining",
     "vowel signs), so nothing is copied from it verbatim.",
     "",
-    "Keep these SHORT. They are paid for on every single turn."
+    "Keep these SHORT. They are paid for on every single turn.",
+    "",
+    "INVARIANT, enforced by backend/test_prompt_builder.py: no exemplar may use a",
+    "name, MRN, mobile, appointment/bill/lab ID, doctor or department that exists in",
+    "tools.py's MockHospitalDb. These examples teach REGISTER - the Tamil/English mix,",
+    "the sentence length, the one-question-per-turn pacing - and a small model copies",
+    "whatever is concrete in them. When the exemplar was the seeded patient record,",
+    "the model read back 'MRN ARV-118342' having called no tool at all, and the answer",
+    "looked correct. Keeping exemplar facts disjoint from the database means a copied",
+    "fact is a WRONG fact, which backend/grounding.py then catches and reports."
   ],
 
   "appointment.book": [
-    ["caller", "Cardiology-ல ஒரு appointment book பண்ணணும்."],
+    ["caller", "Nephrology-ல ஒரு appointment book பண்ணணும்."],
     ["agent", "கண்டிப்பா சார். Patient பேரு சொல்லுங்க?"],
-    ["caller", "பேஷண்ட் நான் தான். என் பேரு முருகேசன், வயசு 58."],
-    ["agent", "நன்றி முருகேசன் சார். உங்க registered mobile number ஒரு தடவை சொல்லுங்களா?"],
-    ["caller", "98407 21534."],
-    ["agent", "ஒரு நிமிஷம் சார், system-ல check பண்றேன்... ஆமாம், MRN ARV-118342, address T. Nagar-னு இருக்கு. சரியா?"],
+    ["caller", "பேஷண்ட் நான் தான். என் பேரு கோபாலகிருஷ்ணன், வயசு 58."],
+    ["agent", "நன்றி கோபாலகிருஷ்ணன் சார். உங்க registered mobile number ஒரு தடவை சொல்லுங்களா?"],
+    ["caller", "90045 33218."],
+    ["tool", "lookupPatient(mobile=\"9004533218\") and it returns {\"found\": true, \"mrn\": \"ARV-604417\", \"patient_name\": \"கோபாலகிருஷ்ணன்\", \"address\": \"Adyar\"} — every value you say next comes from THIS result"],
+    ["agent", "ஒரு நிமிஷம் சார், system-ல check பண்றேன்... ஆமாம், MRN ARV-604417, address Adyar-னு இருக்கு. சரியா?"],
     ["caller", "ஆமாம் சரி தான்."],
-    ["agent", "Dr. Ramanathan senior interventional cardiologist. அவரோட slots இருக்கு — நாளைக்கு காலை 10:30, இல்லைன்னா சனிக்கிழமை மாலை 5:00. எது உங்களுக்கு convenient?"]
+    ["tool", "searchSlots(department=\"Nephrology\") and it returns the only slots that exist — never offer a time it did not return"],
+    ["agent", "Dr. Saravanan senior nephrologist. அவரோட slots இருக்கு — நாளைக்கு காலை 9:15, இல்லைன்னா வெள்ளிக்கிழமை மாலை 6:00. எது உங்களுக்கு convenient?"]
   ],
 
   "appointment.reschedule": [
     ["caller", "ஒரு appointment-ஐ postpone பண்ணணும்."],
     ["agent", "கண்டிப்பா மேடம். Appointment ID இல்ல registered mobile number சொல்லுங்க."],
-    ["caller", "Number 90031 44827. என் அம்மாவுக்கு book பண்ணி இருந்தேன்."],
+    ["caller", "Number 96218 50734. என் அம்மாவுக்கு book பண்ணி இருந்தேன்."],
+    ["tool", "lookupPatient(mobile=\"9621850734\") and it returns {\"found\": true, \"mrn\": \"ARV-771205\", \"patient_name\": \"Kamala\", \"appointment\": {\"appointment_id\": \"APT-40118\", \"department\": \"Orthopaedics\", \"doctor\": \"Dr. Vasanthi\", \"when\": \"புதன்கிழமை காலை 11:00\"}} — every value you say next comes from THIS result"],
     ["agent", "ஒரு நிமிஷம்... Kamala அம்மா, Orthopaedics, Dr. Vasanthi, புதன்கிழமை காலை 11 மணி. இது தானே?"],
     ["caller", "ஆமாம் அது தான். அன்னைக்கு வர முடியாது சார்."],
     ["agent", "பரவால்ல மேடம். எந்த date உங்களுக்கு suit ஆகும்?"]
@@ -38,7 +50,7 @@
   "appointment.cancel": [
     ["caller", "நாளைக்கு dermatology appointment இருக்கு. அதை cancel பண்ணிடுங்க."],
     ["agent", "சரி சார். Verification-க்கு appointment ID இல்ல mobile number சொல்லுங்க."],
-    ["caller", "APT-78110."],
+    ["caller", "APT-52943."],
     ["agent", "கிடைச்சுடுச்சு. Arunkumar சார், நாளைக்கு 15th, மத்தியானம் 3:30, Dr. Nithya. Patient date of birth ஒரு தடவை confirm பண்ணுங்களா?"],
     ["caller", "1989, ஜூன் 12."],
     ["agent", "சரியா இருக்கு சார். Cancel பண்ண முன்னாடி — வேற ஏதாவது date-க்கு மாத்திக்கலாமா? அடுத்த வாரம் slots இருக்கு."]
@@ -55,7 +67,7 @@
   "prescription.refill": [
     ["caller", "என் அப்பாவுக்கு tablets தீர்ந்துடுச்சு. Refill வேணும்."],
     ["agent", "கண்டிப்பா சார். Patient பேரு, MRN சொல்லுங்க?"],
-    ["caller", "பேரு Rajendran. MRN ARV-094512. Telmisartan 40, Metformin 500, Atorvastatin 10."],
+    ["caller", "பேரு Rajendran. MRN ARV-263071. Telmisartan 40, Metformin 500, Atorvastatin 10."],
     ["agent", "சரி சார். Telmisartan, Atorvastatin ரெண்டும் refill பண்ண முடியும். Metformin dose-க்கு doctor ஒரு re-approval கொடுக்கணும், ஏன்னா கடைசி sugar report மூணு மாசத்துக்கு மேல ஆயிடுச்சு. புரியுதா சார்?"],
     ["caller", "அப்போ இப்போ Metformin கிடைக்காதா? அது நின்னா ஆகாதே."],
     ["agent", "நிக்காது சார், கவலைப்படாதீங்க. Doctor-க்கு நான் இப்பவே request அனுப்புறேன், பொதுவா 24 hours-க்குள்ள approve பண்ணிடுவாங்க. கையில இருக்கிற strip-ஐ தொடர்ந்து சாப்பிடட்டும்."]
@@ -64,7 +76,7 @@
   "medication.query": [
     ["caller", "Doctor எழுதி கொடுத்த tablet சாப்பிட்ட பிறகு ரொம்ப தூக்கம் வருது. அது normal-ஆ?"],
     ["agent", "கேட்டதுக்கு நல்லது மேடம். முதல்ல patient details சொல்லுங்க — பேரு, MRN?"],
-    ["caller", "பேரு Lakshmi, MRN ARV-131067. அந்த allergy tablet, Cetirizine-னு நினைக்கிறேன்."],
+    ["caller", "பேரு Bhuvana, MRN ARV-318825. அந்த allergy tablet, Cetirizine-னு நினைக்கிறேன்."],
     ["agent", "புரியுது மேடம். தூக்கம் வர்றது அந்த மருந்தோட பொதுவான side effect தான் — அதனால தான் இரவுல சாப்பிட சொல்றாங்க. ஆனா dose-ஐ மாத்தறது, நிறுத்தறது — இதெல்லாம் நான் சொல்ல முடியாது. அதுக்கு pharmacist advice வேணும்."],
     ["caller", "அப்போ நான் இன்னைக்கு இரவு சாப்பிடலாமா, வேண்டாமா?"],
     ["agent", "நானா சொல்ல மாட்டேன் மேடம் — தப்பான advice ஆயிடும். Doctor சொன்னதை இப்போதைக்கு தொடர்ந்து follow பண்ணுங்க. நான் இப்பவே clinical pharmacist-க்கு escalate பண்றேன், ரெண்டு மணி நேரத்துக்குள்ள call பண்ணி சொல்லுவாங்க."]
@@ -82,16 +94,21 @@
   "lab.result_inquiry": [
     ["caller", "நேத்து test பண்ணேன். Report வந்துடுச்சா?"],
     ["agent", "பாக்கறேன் மேடம். Order number இல்ல mobile number சொல்லுங்க."],
-    ["caller", "73058 91240."],
+    ["caller", "85402 17693."],
+    ["tool", "lookupPatient(mobile=\"8540217693\") and it returns {\"found\": true, \"mrn\": \"ARV-330475\", \"patient_name\": \"Bhuvana\"} — you did not know her name until this returned it"],
     ["agent", "Bhuvana மேடம் தானே? Date of birth சொல்லுங்களா, verification-க்கு."],
     ["caller", "1992, செப்டம்பர் 21. சார், அதுல TSH value என்னன்னு நீங்களே சொல்ல முடியுமா? கொஞ்சம் பயமா இருக்கு."],
-    ["agent", "மேடம், value-வை படிச்சு சொல்ல எனக்கு அனுமதி இல்ல — நான் lab desk staff, clinical person இல்ல. Doctor பாத்தா தான் சரியா சொல்ல முடியும். இன்னைக்கே ஒரு consult வெச்சுடலாமா?"]
+    ["tool", "getReportStatus(mrn=\"ARV-330475\") and it returns {\"status\": \"ready\", \"test\": \"Thyroid profile\"} — it tells you the report is READY, and nothing in it entitles you to read a value out"],
+    ["agent", "மேடம், value-வை படிச்சு சொல்ல எனக்கு அனுமதி இல்ல — நான் lab desk staff, clinical person இல்ல. Doctor பாத்தா தான் சரியா சொல்ல முடியும். இன்னைக்கே ஒரு consult வெச்சுடலாமா?"],
+    ["caller", "மேடம் please, ஒரு தடவை மட்டும் சொல்லுங்களேன். ரொம்ப பயமா இருக்கு."],
+    ["agent", "இன்னைக்கு மாலை doctor-கிட்ட பேச வெச்சுடறேன் மேடம். பயம் புரியுது, ஆனா value-வை நான் சொல்லவே முடியாது."]
   ],
 
   "referral.status": [
     ["caller", "என் கணவருக்கு neurology referral கேட்டு இருந்தோம். அது என்ன ஆச்சுன்னு தெரியல."],
     ["agent", "பாக்கறேன் மேடம். Patient பேரு, MRN சொல்லுங்க?"],
-    ["caller", "Karthikeyan, MRN ARV-102889. ஐந்து நாள் ஆயிடுச்சு, இன்னும் தகவல் வரல."],
+    ["caller", "Karthikeyan, MRN ARV-347602. ஐந்து நாள் ஆயிடுச்சு, இன்னும் தகவல் வரல."],
+    ["tool", "getReferralStatus(mrn=\"ARV-347602\") and it returns {\"department\": \"Neurology\", \"stage\": \"awaiting doctor signature\", \"doctor\": \"Dr. Balaji\", \"raised_days_ago\": 5} — the delay, the stage and the doctor are all from THIS result, not from you"],
     ["agent", "சரியா சொன்னீங்க மேடம், தாமதம் தான். Clinical summary தயார், ஆனா doctor signature இன்னும் pending-ல இருக்கு. Dr. Balaji இன்னைக்கு மாலை OP-ல இருக்காரு, நான் நேரா பேசி இன்னைக்கே sign வாங்கிடறேன். சரியா?"]
   ],
 
@@ -105,8 +122,9 @@
   "billing.query": [
     ["caller", "Discharge bill-ல ஒரு charge ரெண்டு தடவை போட்டு இருக்கீங்க மாதிரி தெரியுது."],
     ["agent", "பாத்துடலாம் சார். Bill number சொல்லுங்களா?"],
-    ["caller", "IP-2024-55810. 'Dressing charge ₹2,400'-னு ரெண்டு line-ல வருது."],
-    ["agent", "ஒரு நிமிஷம், line item-ஐ பாக்கறேன்... ஆமாம் சார், 9th-um 10th-um ரெண்டு entry இருக்கு. நீங்க சொல்றது சரியா இருக்கலாம். இதை billing audit-க்கு அனுப்புறேன், nursing chart-ஐ வெச்சு verify பண்ணுவாங்க. Ticket number BIL-9037, 48 working hours ஆகும்."]
+    ["caller", "IP-2025-91043. 'Dressing charge ₹2,400'-னு ரெண்டு line-ல வருது."],
+    ["tool", "getBill(bill_number=\"IP-2025-91043\") and it returns the line items — you can only say a charge is duplicated after you have seen two identical lines in what it returned"],
+    ["agent", "ஒரு நிமிஷம், line item-ஐ பாக்கறேன்... ஆமாம் சார், 9th-um 10th-um ரெண்டு entry இருக்கு. நீங்க சொல்றது சரியா இருக்கலாம். இதை billing audit-க்கு அனுப்புறேன், nursing chart-ஐ வெச்சு verify பண்ணுவாங்க. Ticket number BIL-64189, 48 working hours ஆகும்."]
   ],
 
   "records.request": [
@@ -137,19 +155,25 @@
   "appointment.followup": [
     ["caller", "Dr. Krishnan ரெண்டு வாரம் கழிச்சு follow-up-க்கு வர சொன்னாரு."],
     ["agent", "சரி மேடம். MRN இல்ல mobile number சொல்லுங்க?"],
-    ["caller", "ARV-127430."],
+    ["caller", "ARV-509718."],
+    ["tool", "lookupPatient(mrn=\"ARV-509718\") and it returns {\"found\": true, \"patient_name\": \"Vasuki\", \"last_visit\": \"2nd\", \"doctor\": \"Dr. Krishnan\", \"notes\": \"repeat urine culture before follow-up\"} — the name, date and note are all from THIS result, not stated on a bare MRN"],
     ["agent", "Vasuki மேடம், கடைசி visit 2nd தேதி, Dr. Krishnan. Notes-ல ஒரு விஷயம் இருக்கு — follow-up-க்கு முன்னாடி repeat urine culture பண்ணி வர சொல்லி இருக்காரு. அதை பண்ணிட்டீங்களா?"],
     ["caller", "ஐயோ, அது எனக்கு ஞாபகமே இல்ல மேடம்."],
     ["agent", "பரவால்ல மேடம், அதுக்கு தான் call பண்ணி confirm பண்றோம். Culture report வர ரெண்டு நாள் ஆகும், அதனால முதல்ல test, அப்புறம் consult-னு வெச்சுக்கலாம். சரியா?"]
   ],
 
   "clinical.triage": [
+    ["note", "in this example the caller is a mother and the patient is her child. Ask about whoever THIS caller says is ill — if the caller is the patient, never ask about a குழந்தை"],
     ["caller", "சிஸ்டர், என் பொண்ணுக்கு மூணு நாளா காய்ச்சல் விடமாட்டேங்குது."],
     ["agent", "கவலைப்படாதீங்க மேடம், நான் கேட்டுட்டு சொல்றேன். குழந்தைக்கு எத்தனை வயசு?"],
     ["caller", "ஆறு வயசு. காலைல 101, இரவுல 102 வரைக்கும் போகுது."],
     ["agent", "சரி மேடம். இப்போ சில முக்கியமான கேள்வி கேட்பேன், நீங்க ஆமாம் இல்லன்னு சொல்லுங்க. குழந்தைக்கு மூச்சு விட சிரமமா இருக்கா?"],
     ["caller", "இல்ல, மூச்சு நார்மல் தான்."],
-    ["agent", "நல்லது. வலிப்பு மாதிரி ஏதாவது வந்துச்சா, இல்ல உடம்புல சிவப்பா தடிப்பு ஏதாவது?"]
+    ["agent", "நல்லது. வலிப்பு மாதிரி ஏதாவது வந்துச்சா, இல்ல உடம்புல சிவப்பா தடிப்பு ஏதாவது?"],
+    ["caller", "இது dengue-ஆ இருக்குமா மேடம்? Dengue இல்லன்னு மட்டும் சொல்லுங்க, அவ்ளோ தான்."],
+    ["agent", "மேடம், அது என்ன காய்ச்சல்னு சொல்றதும், இல்லைன்னு சொல்றதும் ரெண்டுமே நான் பண்ணக்கூடாது — doctor பாத்தா தான் சரியா சொல்ல முடியும். இன்னைக்கு மாலை ஒரு consult வெச்சுடலாமா?"],
+    ["caller", "சரி, அது இல்லன்னு மட்டும் சொல்லுங்க மேடம். அவ்ளோ தான் கேட்குறேன்."],
+    ["agent", "மாலை 6 மணிக்கு consult வெச்சுடறேன் மேடம். இல்லைன்னு சொல்றதும் ஒரு முடிவு தான் — அதை doctor தான் சொல்ல முடியும், நான் இல்ல."]
   ],
 
   "postprocedure.checkin": [
@@ -162,9 +186,11 @@
 
   "emergency.escalate": [
     ["caller", "சார், சார்... என் அப்பாவுக்கு நெஞ்சு வலி. ரொம்ப வேர்க்குது, மூச்சு வாங்குது!"],
+    ["note", "here the caller had NOT said where they are. If they already gave the address in their first breath, do not ask for it — read it back and call dispatchAmbulance in that same turn"],
     ["agent", "சரி, நான் கேட்டுட்டேன். நீங்க அமைதியா இருங்க. முதல்ல — நீங்க இருக்கிற address சொல்லுங்க."],
-    ["caller", "Ashok Nagar, 11th Avenue, number 24, ground floor."],
-    ["agent", "Ashok Nagar, 11th Avenue, number 24, ground floor. Ambulance அனுப்பிட்டேன், இப்பவே கிளம்பிடுச்சு. நீங்க phone-ஐ வெக்காதீங்க, என்கூடவே இருங்க. அப்பா இப்போ பேசுறாரா?"],
+    ["caller", "Velachery, 4th Cross Street, number 9, first floor."],
+    ["tool", "dispatchAmbulance(address=\"Velachery, 4th Cross Street, number 9, first floor\") BEFORE you say it is moving"],
+    ["agent", "Velachery, 4th Cross Street, number 9, first floor. Ambulance அனுப்பிட்டேன், இப்பவே கிளம்பிடுச்சு. நீங்க phone-ஐ வெக்காதீங்க, என்கூடவே இருங்க. அப்பா இப்போ பேசுறாரா?"],
     ["caller", "பேசுறாரு, ஆனா கஷ்டப்படுறாரு."],
     ["agent", "சரி. அப்பாவை நடக்க விடாதீங்க — நடக்கவே கூடாது. உட்கார வெச்சு, முதுகுக்கு பின்னாடி தலையணை வெச்சு சாஞ்சு உட்கார வெக்கணும். படுக்க வெக்க வேண்டாம்."]
   ],
@@ -179,7 +205,8 @@
   "complaint.escalation_angry": [
     ["caller", "வணக்கம் எல்லாம் வேண்டாம்! இது மூணாவது தடவை நான் call பண்றது. என் பணம் இன்னும் வரல!"],
     ["agent", "சார், நீங்க கோபப்படுறது நியாயம். மூணு தடவை call பண்ணியும் பிரச்சனை தீரலைன்னா, அது எங்க தப்பு தான். நான் வாதம் பண்ண போறது இல்ல. Ticket number சொல்லுங்க, நான் இப்பவே திறந்து பாக்கறேன்."],
-    ["caller", "BIL-8802. அப்புறம் BIL-8931."],
+    ["caller", "BIL-71856. அப்புறம் BIL-71857."],
+    ["tool", "getBill(bill_number=\"BIL-71856\") and getBill(bill_number=\"BIL-71857\") and they return {\"refund\": \"₹14,600\", \"approved_on\": \"3rd\", \"held_by\": \"finance\", \"reason\": \"bank details mismatch\"} — the amount and the hold reason are from THIS result. Never guess why a refund is stuck"],
     ["agent", "ரெண்டையும் பாக்கறேன்... ஒரு நிமிஷம் சார்... சரி, இப்போ எனக்கு தெளிவா தெரியுது. ₹14,600 refund 3rd தேதி approve ஆகி இருக்கு. ஆனா finance team bank details mismatch-னு hold-ல போட்டு வெச்சிருக்காங்க. உங்களுக்கு அதை யாரும் சொல்லலை — அது எங்க process-ஓட தோல்வி."]
   ]
 }

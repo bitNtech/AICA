@@ -40,6 +40,20 @@ pytest-asyncio>=0.24
 # pytorch_lightning NeptuneLogger, datasets 3 pulling hub>=1.0) or where a
 # newer release requires numpy>=2 (pyannote 6, onnx 1.19+ via ml_dtypes).
 # numpy stays <2 above: NeMo 1.23 still calls np.sctypes, removed in 2.0.
+# NeMo's ASR import chain pulls these in unconditionally, and `--no-deps` means
+# NeMo cannot install them itself. Without them backend/asr.py's load() raises
+# ModuleNotFoundError and the microphone path is silently unavailable - the
+# server still starts and answers, it just reports asr_ready:false (see
+# main.py's lifespan and /api/health), which is easy to mistake for a model-
+# access problem rather than a missing package. Found one at a time by loading
+# the model until it stopped raising: librosa (preprocessing.features),
+# sentencepiece (the multilingual tokenizer), jiwer (WER metrics, imported at
+# module scope by the ASR collection).
+librosa>=0.10,<0.11
+sentencepiece
+jiwer
+editdistance
+braceexpand
 hydra-core>1.3,<=1.3.2
 pytorch-lightning==2.2.5
 datasets<3

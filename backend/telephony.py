@@ -94,6 +94,7 @@ from .conversation import ConversationManager
 from .llm import LlmClient
 from .persistence import CallEventStore
 from .settings import AudioSettings, SUPPORTED_LANGUAGES, SecuritySettings
+from .tasks import shutdown_worker
 from .tts import SvaraTts
 from .vad import TenVadSegmenter, VadUpdate
 
@@ -230,7 +231,7 @@ async def capture_telephony_audio(websocket: WebSocket) -> None:
     # Tracks whichever speak() task is currently synthesizing/sending audio, so
     # queue_segment() can cancel it the moment the caller barges in - reused
     # unmodified from backend/barge_in.py, same as the browser leg.
-    active_speech = ActiveSpeech()
+    active_speech = ActiveSpeech(settings.barge_in_speech_frames)
 
     async def speak(text: str) -> None:
         """Chunk one agent reply into clauses, synthesize each, send as u-law over the wire.
@@ -300,8 +301,10 @@ async def capture_telephony_audio(websocket: WebSocket) -> None:
         if update.speech_started:
             await record_event({"type": "vad_start", "probability": round(update.probability, 4)})
             logger.info("speech started: %s", connection_id)
-            if active_speech.interrupt():
-                logger.info("barge-in: cancelling in-flight agent speech for %s", connection_id)
+        # Same gate as main.py: a phone line has more noise than a headset, not
+        # less. See ActiveSpeech.note_speech().
+        if active_speech.note_speech(update.speech_frame, update.speech_started):
+            logger.info("barge-in: cancelling in-flight agent speech for %s", connection_id)
         if not update.speech_ended:
             return
 
@@ -499,14 +502,14 @@ async def capture_telephony_audio(websocket: WebSocket) -> None:
             if final_update:
                 with suppress(WebSocketDisconnect, RuntimeError):
                     await queue_segment(final_update)
+        # Sentinel first, then a bounded wait rather than an immediate cancel:
+        # a worker mid-turn otherwise loses the tail of that turn (its last
+        # clause, its agent_speaking_end) from the call log, because those are
+        # written by a turn's very last statements. See backend/tasks.py.
         await transcription_queue.put(None)
         await conversation_queue.put(None)
-        worker.cancel()
-        conversation_worker.cancel()
-        with suppress(asyncio.CancelledError):
-            await worker
-        with suppress(asyncio.CancelledError):
-            await conversation_worker
+        await shutdown_worker(worker, "telephony transcription worker")
+        await shutdown_worker(conversation_worker, "telephony conversation worker")
         conversation.end_call(connection_id)
         call_store.end_call(connection_id)
         logger.info(

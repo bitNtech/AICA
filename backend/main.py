@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
+import time
 from uuid import uuid4
 
 import numpy as np
@@ -16,7 +18,7 @@ from fastapi.responses import HTMLResponse
 from .asr import IndicConformerAsr
 from .barge_in import ActiveSpeech
 from .clause_chunker import ClauseChunker
-from .conversation import ConversationManager
+from .conversation import AgentClause, AgentTurn, CallControl, ConversationManager, ToolInvoked
 from .llm import LlmClient
 from .persistence import CallEventStore
 from .settings import (
@@ -28,6 +30,7 @@ from .settings import (
     SUPPORTED_LANGUAGES,
     TtsSettings,
 )
+from .tasks import shutdown_worker
 from .telephony import router as telephony_router
 from .tts import SvaraTts, create_tts
 from .vad import TenVadSegmenter, VadUpdate
@@ -40,6 +43,33 @@ logger = logging.getLogger("aica.audio")
 # between partial_transcript updates - frequent enough to feel responsive,
 # far below a rate that would make repeated CTC decodes a latency problem.
 PARTIAL_TRANSCRIPT_INTERVAL_FRAMES = 30
+
+# How many clauses may be mid-synthesis at once. The audible gap between the
+# agent's sentences was one whole synthesis round-trip, because each clause was
+# only synthesized after the previous one had been sent - and the default
+# engine is a network call to Microsoft (measured 849ms to 10.8s per clause,
+# see LLM_TEST_RESULTS.txt). Starting the next clause while the current one is
+# still in flight hides all but the first of those behind audio the caller is
+# already hearing. Real concurrency is still bounded by the TTS semaphore; this
+# only decides how far ahead of playback we are willing to queue work.
+SYNTH_LOOKAHEAD = 3
+
+# Sent once per turn when TTS is unavailable. The React dashboard matches on
+# this exact string to collapse the repeat into a single banner instead of one
+# error pill per turn, so it is a wire constant - do not reword it casually.
+TTS_UNAVAILABLE_MESSAGE = (
+    "TTS is unavailable, so agent replies are text-only. Check TTS_ENGINE and the "
+    "server log for the load() failure."
+)
+
+
+@dataclass
+class ConversationTurnOutcome:
+    """What one agent turn produced, once its speech has finished going out."""
+
+    spoken: list[str] = field(default_factory=list)
+    call_control: CallControl | None = None
+    interrupted: bool = False
 
 
 @asynccontextmanager
@@ -120,6 +150,48 @@ async def console() -> HTMLResponse:
     return HTMLResponse(_CONSOLE_HTML.read_text(encoding="utf-8"))
 
 
+@app.get("/api/health")
+async def health() -> dict:
+    """Which pieces of the pipeline actually came up.
+
+    lifespan() logs each component's load failure and carries on, so a server
+    that answers requests is not evidence that ASR, the LLM or TTS is usable.
+    This is the one place to look to find out which - and it is what the
+    console's status pills read before a socket is even opened.
+    """
+    llm: LlmClient = app.state.llm
+    return {
+        "asr_ready": app.state.asr.ready,
+        "conversation_ready": app.state.conversation.ready,
+        "llm_ready": llm.ready,
+        "llm_model": llm.settings.model,
+        "llm_base_url": llm.settings.base_url,
+        "tts_ready": app.state.tts.ready,
+    }
+
+
+@app.get("/api/calls")
+async def list_calls(limit: int = 50) -> dict:
+    """Call Log: every call this server has handled, newest first.
+
+    BACKEND_COMPLETION.md Sec3.6 - the call events were already being persisted
+    but nothing could read them back, so a disconnect still lost the call as
+    far as any client was concerned.
+    """
+    call_store: CallEventStore = app.state.call_store
+    limit = max(1, min(limit, 500))
+    calls = await asyncio.to_thread(call_store.recent_calls, limit)
+    return {"calls": calls}
+
+
+@app.get("/api/calls/{connection_id}")
+async def get_call(connection_id: str) -> dict:
+    """One call's full event history, oldest first - the transcript view."""
+    call_store: CallEventStore = app.state.call_store
+    events = await asyncio.to_thread(call_store.events_for_call, connection_id)
+    return {"connection_id": connection_id, "events": events}
+
+
 def _validate_start_event(payload: dict[str, object], settings: AudioSettings) -> str:
     if payload.get("audio_format") != "pcm_s16le":
         raise ValueError("audio_format must be pcm_s16le")
@@ -184,10 +256,31 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
 
     call_store.start_call(connection_id)
 
+    # Persistence runs behind a queue, not inline in send_event. Writing each
+    # event to SQLite before returning put a disk round-trip between every
+    # clause and the synthesis of the next one, and made a slow or contended
+    # write able to stall the agent mid-sentence - exactly what persistence.py's
+    # "never take down a live call" contract rules out. The queue is unbounded
+    # because dropping call history to keep audio flowing is the right trade in
+    # the only direction that matters, and an event is a few hundred bytes.
+    event_queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def persist_events() -> None:
+        while True:
+            payload = await event_queue.get()
+            try:
+                if payload is None:
+                    return
+                await asyncio.to_thread(call_store.record, connection_id, payload)
+            except Exception:
+                logger.exception("failed to persist call event for %s", connection_id)
+            finally:
+                event_queue.task_done()
+
     async def send_event(payload: dict[str, object]) -> None:
         async with send_lock:
             await websocket.send_json(payload)
-        await asyncio.to_thread(call_store.record, connection_id, payload)
+        event_queue.put_nowait(payload)
 
     try:
         segmenter = TenVadSegmenter(settings)
@@ -205,54 +298,185 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
     # Tracks whichever speak() task is currently synthesizing/sending audio, so
     # queue_segment() can cancel it the moment the caller barges in - see
     # BACKEND_COMPLETION.md Sec3.2 and backend/barge_in.py.
-    active_speech = ActiveSpeech()
+    active_speech = ActiveSpeech(settings.barge_in_speech_frames)
 
-    async def speak(text: str) -> None:
-        """Chunk one agent reply into clauses and synthesize+send each in turn.
+    async def apply_call_control(control: CallControl) -> None:
+        """Act on a hangUp/transferCall the model made during the turn.
 
-        Full-reply-then-chunk for v1, not token-level streaming (see
-        BACKEND_COMPLETION.md Sec6 item 2 / _split_reply_into_clauses) - so
-        this waits for the complete text before the first clause goes out.
+        Runs only after the turn's speech has actually been sent, so the agent
+        is never cut off mid-goodbye by its own hang-up. The event goes out
+        before the close so a client can distinguish "the agent ended the call"
+        from "the socket dropped".
+        """
+        await send_event({"type": "call_control", "action": control.action, "detail": control.detail})
+        if control.action != "hang_up":
+            # A transfer is a telephony-side bridge this browser transport has
+            # no way to perform; the event above is what a real SIP leg (or the
+            # dashboard) acts on. Keep the socket open either way.
+            return
+        logger.info("agent ended the call: %s (%s)", connection_id, control.detail)
+        with suppress(WebSocketDisconnect, RuntimeError):
+            await websocket.close(code=1000)
+
+    async def synthesize_clause(clause: str) -> bytes | None:
+        """Synthesize one clause to PCM bytes, or None if it produced no audio.
+
+        Deliberately does NOT send anything. Sending is ordered and must follow
+        the clause sequence exactly; synthesis is the slow part and is what
+        speak() overlaps across clauses - see SYNTH_LOOKAHEAD.
+        """
+        if not tts.ready:
+            return None
+        queued_at = time.perf_counter()
+        try:
+            async with websocket.app.state.tts_semaphore:
+                waited = time.perf_counter() - queued_at
+                started_at = time.perf_counter()
+                result = await asyncio.to_thread(tts.synthesize, clause, language)
+                # The gap the caller hears between sentences is exactly this
+                # number minus whatever audio was still playing. Logged per
+                # clause because the engine's latency is wildly variable
+                # (849ms-10.8s measured) and an average hides that.
+                logger.info(
+                    "TTS clause %d chars: %.2fs synth, %.2fs queued behind semaphore",
+                    len(clause),
+                    time.perf_counter() - started_at,
+                    waited,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            # One clause losing its audio must not lose the rest of the turn.
+            # The default engine is a network call (see tts.py), so a failure
+            # here is usually a blip: the text has already gone out, so the
+            # caller sees the reply either way, and the next clause gets its
+            # own attempt rather than the whole turn being abandoned.
+            logger.warning("TTS failed for a clause on %s: %s", connection_id, error)
+            await send_event({"type": "agent_audio_error", "message": str(error)})
+            return None
+        return result.samples.tobytes() if result.samples.size else None
+
+    async def speak(clauses) -> ConversationTurnOutcome:
+        """Synthesize and send an agent turn clause by clause as it is produced.
+
+        `clauses` is an async iterator, not a finished string: the first clause
+        goes out while the LLM is still generating the rest
+        (BACKEND_COMPLETION.md Sec3.2), so the caller stops waiting on total
+        generation time and starts waiting only on time-to-first-clause.
 
         Cancellable mid-clause for barge-in: a caller speaking over the agent
-        cancels the task running this coroutine (see queue_segment()). There
-        is no separate outbound audio queue to flush - the for loop below is
-        what's in flight, so cancelling it is what stops any further clause
-        from ever being synthesized or sent.
+        cancels the task running this coroutine (see queue_segment()). There is
+        no separate outbound audio queue to flush - this loop is what's in
+        flight, so cancelling it stops both any further synthesis and, now,
+        the LLM generation feeding it.
         """
-        clauses = _split_reply_into_clauses(text)
-        if not clauses:
-            return
+        outcome = ConversationTurnOutcome()
+        started = False
+        # Synthesis tasks in clause order, handed to a sender that runs
+        # INDEPENDENTLY of clause arrival. Draining them inline from the loop
+        # below looks equivalent and is not: the loop is blocked awaiting the
+        # LLM's next clause, so clause one's finished audio sat undelivered
+        # until clause three showed up (measured - first audio 7.5s when the
+        # audio had been ready since 5.9s). A separate consumer sends it the
+        # moment it is ready. Order is preserved because the queue is FIFO and
+        # each item is awaited in turn.
+        audio_queue: asyncio.Queue[asyncio.Task | None] = asyncio.Queue()
+        synth_tasks: list[asyncio.Task] = []
 
-        await send_event({"type": "agent_speaking_start", "sample_rate": tts.sample_rate if tts.ready else None})
-        if not tts.ready:
-            await send_event(
-                {
-                    "type": "agent_error",
-                    "message": (
-                        "TTS model is unavailable. backend/tts.py's load() is a "
-                        "placeholder until a real svara-TTS reference is wired in."
-                    ),
-                }
-            )
+        async def send_audio_in_order() -> None:
+            while True:
+                task = await audio_queue.get()
+                if task is None:
+                    return
+                blocked_at = time.perf_counter()
+                audio = await task
+                # How long the sender sat idle on synthesis already started -
+                # the silence the caller actually hears between sentences.
+                # Trends to zero for every clause after the first when the
+                # pipeline is keeping up.
+                logger.info(
+                    "TTS send waited %.2fs for the next clause", time.perf_counter() - blocked_at
+                )
+                if audio:
+                    async with send_lock:
+                        await websocket.send_bytes(audio)
+
+        sender = asyncio.create_task(send_audio_in_order())
 
         try:
-            for clause in clauses:
-                await send_event({"type": "agent_clause", "text": clause})
-                if not tts.ready:
+            async for item in clauses:
+                if isinstance(item, ToolInvoked):
+                    await send_event(
+                        {
+                            "type": "agent_tool_call",
+                            "name": item.name,
+                            "arguments": item.arguments,
+                            "result": item.result,
+                        }
+                    )
                     continue
-                async with websocket.app.state.tts_semaphore:
-                    result = await asyncio.to_thread(tts.synthesize, clause, language)
-                if result.samples.size:
-                    async with send_lock:
-                        await websocket.send_bytes(result.samples.tobytes())
+                if isinstance(item, AgentTurn):
+                    outcome.call_control = item.call_control
+                    if item.ungrounded:
+                        # Reported, never silently swallowed: the caller has
+                        # already heard these, so the only useful thing left is
+                        # to make them visible in the console and the call log.
+                        await send_event(
+                            {"type": "grounding_warning", "identifiers": list(item.ungrounded)}
+                        )
+                    if item.unbacked_claims:
+                        # A separate event rather than more identifiers: this
+                        # one is about something the server did NOT do, which
+                        # the console has to say differently.
+                        await send_event(
+                            {"type": "action_claim_warning", "claims": list(item.unbacked_claims)}
+                        )
+                    continue
+
+                if not started:
+                    # Deferred until there is something to say: announcing
+                    # "speaking" and then producing only a tool call would
+                    # leave the UI's speaking indicator stuck on.
+                    started = True
+                    await send_event(
+                        {"type": "agent_speaking_start", "sample_rate": tts.sample_rate if tts.ready else None}
+                    )
+                    if not tts.ready:
+                        await send_event({"type": "agent_error", "message": TTS_UNAVAILABLE_MESSAGE})
+
+                outcome.spoken.append(item.text)
+                # Text first, always: the transcript must not lag the audio,
+                # and when TTS is unavailable this is the whole of the output.
+                await send_event({"type": "agent_clause", "text": item.text})
+                task = asyncio.create_task(synthesize_clause(item.text))
+                synth_tasks.append(task)
+                audio_queue.put_nowait(task)
+                # Backpressure: don't run further than SYNTH_LOOKAHEAD clauses
+                # ahead of what the caller is actually hearing.
+                while sum(not t.done() for t in synth_tasks) > SYNTH_LOOKAHEAD:
+                    await asyncio.sleep(0.05)
+            audio_queue.put_nowait(None)
+            await sender
         except asyncio.CancelledError:
+            # Barge-in: drop the audio the caller talked over rather than
+            # letting already-started synthesis land on top of their voice.
+            sender.cancel()
+            for task in synth_tasks:
+                task.cancel()
             logger.info("agent speech interrupted by barge-in: %s", connection_id)
+            outcome.interrupted = True
             with suppress(WebSocketDisconnect, RuntimeError):
                 await send_event({"type": "agent_interrupted"})
-            return
+            return outcome
 
-        await send_event({"type": "agent_speaking_end"})
+        if started:
+            await send_event({"type": "agent_speaking_end"})
+        return outcome
+
+    async def greeting_clauses(text: str):
+        """Adapt the scripted greeting to the same async shape a turn produces."""
+        for clause in _split_reply_into_clauses(text):
+            yield AgentClause(clause)
 
     async def handle_conversation_turns() -> None:
         while True:
@@ -261,13 +485,28 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
                 if item is None:
                     return
                 kind, payload = item
-                reply_text = payload if kind == "greeting" else await conversation.handle_utterance(connection_id, llm, payload)
-                speak_task = asyncio.create_task(speak(reply_text))
+                clauses = (
+                    greeting_clauses(payload)
+                    if kind == "greeting"
+                    else conversation.stream_utterance(connection_id, llm, payload)
+                )
+                speak_task = asyncio.create_task(speak(clauses))
                 active_speech.set(speak_task)
                 try:
-                    await speak_task
+                    outcome = await speak_task
                 finally:
                     active_speech.clear(speak_task)
+                    # Closing the generator runs stream_utterance's own cleanup
+                    # even when the task above was cancelled mid-yield.
+                    with suppress(Exception):
+                        await clauses.aclose()
+
+                if outcome.interrupted:
+                    conversation.record_interrupted_turn(connection_id, " ".join(outcome.spoken))
+                elif outcome.call_control is not None:
+                    await apply_call_control(outcome.call_control)
+            except asyncio.CancelledError:
+                raise
             except Exception as error:
                 logger.exception("agent turn failed for %s", connection_id)
                 with suppress(WebSocketDisconnect, RuntimeError):
@@ -280,8 +519,10 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
         if update.speech_started:
             await send_event({"type": "vad_start", "probability": round(update.probability, 4)})
             logger.info("speech started: %s", connection_id)
-            if active_speech.interrupt():
-                logger.info("barge-in: cancelling in-flight agent speech for %s", connection_id)
+        # Not on speech_started: one flagged 16 ms hop is a cough, not a
+        # caller interrupting. See ActiveSpeech.note_speech().
+        if active_speech.note_speech(update.speech_frame, update.speech_started):
+            logger.info("barge-in: cancelling in-flight agent speech for %s", connection_id)
 
         if not update.speech_ended:
             if segmenter.in_speech and asr.ready:
@@ -353,6 +594,10 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
 
     worker = asyncio.create_task(transcribe_segments())
     conversation_worker = asyncio.create_task(handle_conversation_turns())
+    persistence_worker = asyncio.create_task(persist_events())
+    # Started when the call opens, to evaluate the prompt under the greeting.
+    # Held so teardown can cancel it if the call ends while it is still running.
+    prewarm_task: asyncio.Task | None = None
     logger.info("audio pipeline connected: %s", connection_id)
     await send_event(
         {
@@ -387,6 +632,17 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
                         if conversation.ready:
                             greeting = conversation.start_call(connection_id, agent_name=conversation.settings.agent_name)
                             await conversation_queue.put(("greeting", greeting))
+                            # Evaluate the prompt while the greeting is being
+                            # spoken. The first turn of a call otherwise pays
+                            # 6-8s to evaluate ~2.7k tokens cold, and the
+                            # greeting is ~3s of audio during which the model
+                            # is idle and the caller is occupied. Fire and
+                            # forget: it is cancelled with the call, and any
+                            # failure just leaves the first turn as slow as it
+                            # was before.
+                            prewarm_task = asyncio.create_task(
+                                conversation.prewarm(connection_id, llm)
+                            )
                         else:
                             await send_event(
                                 {
@@ -450,14 +706,25 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
         if final_update:
             with suppress(WebSocketDisconnect, RuntimeError):
                 await queue_segment(final_update)
+        # Sentinel first, then a bounded wait: a worker mid-turn gets the
+        # chance to finish and record how the turn ended, instead of being
+        # cancelled on the spot and truncating the call log there. See
+        # backend/tasks.py.
+        # The prewarm is pure optimisation and nothing waits on its result, so
+        # it is cancelled outright rather than drained - unlike the workers
+        # below, it has no call state to finish writing.
+        if prewarm_task is not None and not prewarm_task.done():
+            prewarm_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await prewarm_task
         await transcription_queue.put(None)
         await conversation_queue.put(None)
-        worker.cancel()
-        conversation_worker.cancel()
-        with suppress(asyncio.CancelledError):
-            await worker
-        with suppress(asyncio.CancelledError):
-            await conversation_worker
+        await shutdown_worker(worker, "transcription worker")
+        await shutdown_worker(conversation_worker, "conversation worker")
+        # Drained last, so it also captures whatever the two workers above
+        # emitted on their way out.
+        event_queue.put_nowait(None)
+        await shutdown_worker(persistence_worker, "persistence worker")
         conversation.end_call(connection_id)
         call_store.end_call(connection_id)
         logger.info(

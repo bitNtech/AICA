@@ -100,3 +100,54 @@ if __name__ == "__main__":
     test_decimal_point_does_not_trigger_a_false_split()
     test_multiple_abbreviations_in_one_turn()
     print("ok")
+
+
+# --- the opening chunk is the only one whose latency the caller can hear ---
+
+def test_the_first_chunk_closes_on_a_comma_so_audio_starts_sooner() -> None:
+    """Measured: an opening sentence of 40 characters produced NO audio for 5.9
+    seconds, because nothing could be synthesized until its full stop arrived.
+    Every later chunk is generated while the previous one is still playing, so
+    only the first one needs this.
+    """
+    chunker = ClauseChunker()
+
+    clauses = chunker.feed("ICU-க்கு மாலை 5 to 5:30 மட்டும், அதுவும் ஒரு நேரத்துல ஒருத்தர் தான். ")
+
+    assert clauses[0] == "ICU-க்கு மாலை 5 to 5:30 மட்டும்,"
+
+
+def test_later_chunks_still_wait_for_a_sentence_end() -> None:
+    """Breaking every clause on commas would make the whole turn staccato. The
+    fast rule applies to the opening only."""
+    chunker = ClauseChunker()
+    chunker.feed("சரி மேடம், ")  # releases the first chunk
+
+    clauses = chunker.feed("Appointment book பண்ணிட்டேன், reference SMS-ல வரும். ")
+
+    assert clauses == ["Appointment book பண்ணிட்டேன், reference SMS-ல வரும்."]
+
+
+def test_an_opening_with_no_punctuation_still_releases_at_a_word_boundary() -> None:
+    chunker = ClauseChunker()
+
+    clauses = chunker.feed("இது ரொம்ப நீளமான ஒரு வாக்கியம் எந்த நிறுத்தக்குறியும் இல்லாம வருது ")
+
+    assert clauses, "a long comma-less opening must not hold the audio back"
+    assert not clauses[0].endswith(" ")
+
+
+def test_the_fast_rule_still_respects_abbreviations_and_decimals() -> None:
+    chunker = ClauseChunker()
+
+    clauses = chunker.feed("Dr. Ramanathan 37.5 degree fever இருக்கு. ")
+
+    assert clauses == ["Dr. Ramanathan 37.5 degree fever இருக்கு."]
+
+
+def test_fast_first_chunk_can_be_switched_off() -> None:
+    chunker = ClauseChunker(fast_first_chunk=False)
+
+    clauses = chunker.feed("சரி மேடம், அப்படியே பண்ணிடறேன். ")
+
+    assert clauses == ["சரி மேடம், அப்படியே பண்ணிடறேன்."]

@@ -206,3 +206,33 @@ def test_synthesize_works_from_inside_a_running_event_loop(monkeypatch) -> None:
 
     assert result.samples.dtype == np.int16
     assert result.samples.size == 2
+
+
+def test_a_stalled_endpoint_gives_up_instead_of_hanging_the_turn(monkeypatch) -> None:
+    """Measured failure: an unreachable endpoint cost 21s on ONE clause, and the
+    sender holds every later clause's audio behind it."""
+    import sys
+    import time
+    import types
+
+    class _Stalling:
+        def __init__(self, text, voice) -> None:
+            pass
+
+        async def stream(self):
+            await asyncio.sleep(5)  # a regression fails here in 5s, not forever
+            yield {"type": "audio", "data": b""}
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_Stalling))
+    tts = EdgeTts(TtsSettings(timeout_seconds=0.2))
+    tts._voice = "ta-IN-PallaviNeural"
+
+    started = time.perf_counter()
+    try:
+        tts.synthesize("வணக்கம்", "ta")
+        raise AssertionError("a stalled endpoint must not return audio")
+    except RuntimeError as error:
+        assert "timed out" in str(error)
+    elapsed = time.perf_counter() - started
+    # One timeout, not two: retrying a stall just stalls again.
+    assert elapsed < 1.0, f"gave up after {elapsed:.2f}s, timeout was 0.2s"

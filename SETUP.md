@@ -9,12 +9,17 @@ branch's own SETUP/README if you need the two running together for
 
 ```
 Browser mic/keyboard --WebSocket--> FastAPI /ws/audio --> TEN VAD --> IndicConformer ASR (Tamil)
-      --> Conversation Manager --> LLM (OpenAI-compatible, e.g. Ollama) --> [TTS: not built yet]
+      --> Conversation Manager --> LLM (OpenAI-compatible, e.g. Ollama) --> clause-by-clause TTS
       --> agent reply text streams back to the browser transcript
 ```
 
-Everything up through the LLM reply is real and wired up. TTS is a documented
-placeholder in this backend build (see the TTS section under Component
+The whole chain is wired up and runs end to end, voice in to voice out: verify it on
+your own machine with `python -m backend.scripts.e2e_check` against a running server,
+which synthesizes a caller's Tamil line, streams it in as 16 kHz PCM, and checks that a
+transcript came back and the reply carried both text and audio.
+
+Only `TTS_ENGINE=svara` remains a placeholder; the default `edge` engine is real (see
+the TTS section under Component
 recommendations below) — voice replies don't exist yet regardless of what you install.
 
 ## Setup
@@ -99,8 +104,12 @@ the verified default. Build it with the pinned context:
 
 ```bash
 ollama pull qwen3:4b-instruct-2507-q4_K_M
-ollama create aruvi-base -f Modelfile     # bakes num_ctx 8192
-# then set LLM_MODEL=aruvi-base in .env
+python -m backend.scripts.setup_model     # creates aruvi-base, num_ctx 8192, from the
+                                          # best base you actually have installed
+# .env already says LLM_MODEL=aruvi-base
+
+# Equivalent by hand, if you prefer:
+#   ollama create aruvi-base -f Modelfile
 ```
 
 > **Latency warning:** on CPU this measures ~3.6 tok/s, i.e. minutes per turn — fine
@@ -232,3 +241,32 @@ for the MVP.
   `LLM_BASE_URL`/`LLM_MODEL` match what you actually pulled.
 - **A connected client can't reach the backend at all** → confirm `uvicorn` is running
   on the port your client points at (default `ws://localhost:8000/ws/audio`).
+
+## GPU settings (measured on a 4GB RTX 2050)
+
+Two environment variables must be set for the Ollama **server** process, not for
+the backend. They are already persisted for the current user; set them again on
+a new machine:
+
+```
+setx OLLAMA_FLASH_ATTENTION 1
+setx OLLAMA_KV_CACHE_TYPE q8_0
+```
+
+Then restart Ollama (quit the tray app and reopen it) so the server picks them
+up, and check with `ollama ps` that `SIZE` dropped.
+
+Why: at `num_ctx 8192` an f16 KV cache costs ~1.2GB on top of ~2.5GB of weights,
+which does not fit in 4GB, so Ollama silently keeps ~40% of the model on the CPU.
+Quantising the KV cache to q8_0 halves it **without losing any context**:
+
+| | generation |
+|---|---|
+| default (f16 KV) | 16.6 tok/s, 58% of the model in VRAM |
+| flash attention + q8_0 KV | 27.2 tok/s, 67% in VRAM |
+
+**Do not add `PARAMETER num_gpu 99`.** Forcing every layer onto the card looks
+~2x faster when measured with a short prompt and is catastrophic with the real
+~2.7k-token one: the weights fit but the weights plus a real KV cache do not,
+and Windows spills the difference to system RAM over PCIe. One turn measured
+**114 seconds**. Tune this only against a realistic prompt.

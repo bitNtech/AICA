@@ -62,6 +62,11 @@ class SynthesisResult:
     sample_rate: int
 
 
+# One retry, briefly delayed. Enough to ride out a connect timeout without
+# adding a perceptible stall to a turn that was going to fail anyway.
+EDGE_ATTEMPTS = 2
+EDGE_RETRY_DELAY_SECONDS = 0.4
+
 # Microsoft's neural voices for the languages settings.py already accepts.
 # Female by default: the golden transcripts are written around a woman at the
 # desk (Gayathri, Deepa, Kavitha...), and conversation.OPENING_LINE names her.
@@ -159,13 +164,49 @@ class EdgeTts:
         return SynthesisResult(samples=samples, sample_rate=self._sample_rate)
 
     async def _stream_mp3(self, text: str) -> bytes:
+        """Fetch one clause's audio, retrying a transient network failure.
+
+        This engine is a network call to a Microsoft endpoint, so a single
+        dropped connection is an ordinary event, not a fault - and losing it
+        costs the caller the voice for that clause while the text still goes
+        out, which reads as the agent going silent mid-sentence. One quick
+        retry converts the common case (a timeout on connect) into a small
+        delay. A second failure is reported to the caller of synthesize()
+        rather than retried further: on a voice channel, late audio is worth
+        less than a turn that moves on.
+        """
         import edge_tts
 
-        chunks = bytearray()
-        async for chunk in edge_tts.Communicate(text, self._voice).stream():
-            if chunk["type"] == "audio":
-                chunks += chunk["data"]
-        return bytes(chunks)
+        timeout = self.settings.timeout_seconds
+        last_error: Exception | None = None
+        for attempt in range(EDGE_ATTEMPTS):
+            try:
+                async with asyncio.timeout(timeout):
+                    chunks = bytearray()
+                    async for chunk in edge_tts.Communicate(text, self._voice).stream():
+                        if chunk["type"] == "audio":
+                            chunks += chunk["data"]
+                    return bytes(chunks)
+            except TimeoutError as error:
+                # Deliberately NOT retried. A timeout means the endpoint is
+                # stalling rather than refusing, and the second attempt stalls
+                # the same way: measured 10s + 10s = 21s on one clause, during
+                # which the whole turn's remaining audio sat behind it.
+                logger.warning("edge TTS timed out after %.1fs for %r", timeout, text[:40])
+                raise RuntimeError(f"edge TTS timed out after {timeout:.1f}s") from error
+            except Exception as error:  # aiohttp raises a family of these
+                last_error = error
+                logger.warning(
+                    "edge TTS attempt %d/%d failed for %r: %s",
+                    attempt + 1,
+                    EDGE_ATTEMPTS,
+                    text[:40],
+                    error,
+                )
+                if attempt + 1 < EDGE_ATTEMPTS:
+                    await asyncio.sleep(EDGE_RETRY_DELAY_SECONDS)
+
+        raise RuntimeError(f"edge TTS failed after {EDGE_ATTEMPTS} attempts: {last_error}")
 
 
 class SvaraTts:

@@ -28,7 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from backend.conversation import ConversationManager
-from backend.llm import LlmClient, LlmReply
+from backend.llm import LlmClient, LlmReply, ReplyComplete
 from backend.settings import ConversationSettings, LlmSettings
 
 DEFAULT_UTTERANCE = "வணக்கம் மேடம். Cardiology-ல ஒரு appointment book பண்ணணும்."
@@ -52,21 +52,41 @@ class _LoggingLlmClient:
     def __init__(self, inner: LlmClient) -> None:
         self._inner = inner
 
+    async def stream(self, messages: list[dict], tools: list[dict]):
+        """Proxy the streaming interface conversation.py actually consumes.
+
+        This shim has to mirror LlmClient's whole surface, not just complete():
+        stream_utterance() calls stream(), so a shim that only wrapped
+        complete() silently turned every replay into an AttributeError and
+        every flow into a FAIL that said nothing about the model.
+        """
+        print(f"\n>>> LLM request: {len(messages)} messages, {len(tools)} tool schemas")
+        for message in messages:
+            _print_message(message)
+
+        async for event in self._inner.stream(messages, tools):
+            if isinstance(event, ReplyComplete):
+                _print_reply(event.reply)
+            yield event
+
     async def complete(self, messages: list[dict], tools: list[dict]) -> LlmReply:
         print(f"\n>>> LLM request: {len(messages)} messages, {len(tools)} tool schemas")
         for message in messages:
             _print_message(message)
 
         reply = await self._inner.complete(messages, tools)
-
-        print("\n<<< LLM reply")
-        print(f"    content: {reply.content!r}")
-        if reply.tool_calls:
-            for call in reply.tool_calls:
-                print(f"    tool_call: {call.name}({call.arguments}) [id={call.id}]")
-        else:
-            print("    tool_call: (none)")
+        _print_reply(reply)
         return reply
+
+
+def _print_reply(reply: LlmReply) -> None:
+    print("\n<<< LLM reply")
+    print(f"    content: {reply.content!r}")
+    if reply.tool_calls:
+        for call in reply.tool_calls:
+            print(f"    tool_call: {call.name}({call.arguments}) [id={call.id}]")
+    else:
+        print("    tool_call: (none)")
 
 
 def _print_message(message: dict) -> None:
