@@ -253,6 +253,13 @@ def test_self_echo_is_recognised_but_a_real_caller_turn_is_not() -> None:
     assert is_probably_self_echo("எந்த department-க்கு வேணும்", agent)
     assert is_probably_self_echo("நன்றி சார் எந்த department", agent)
 
+    # THE ONE THAT MATTERS. Answering a question reuses the question's words -
+    # that is what answering IS. Measured live: this exact turn was discarded
+    # as echo, and the caller had to repeat themselves. The answer carries new
+    # content ("Cardiology"); the echo above carries none.
+    assert not is_probably_self_echo("Cardiology department வேணும் சார்", agent)
+    assert not is_probably_self_echo("கார்தாலஜி department வேணும் சார்", agent)
+
     # A real answer shares a word or two and must survive.
     assert not is_probably_self_echo("எனக்கு Cardiology-ல appointment வேணும்", agent)
     assert not is_probably_self_echo("என் பேரு முருகேசன், வயசு 58", agent)

@@ -65,6 +65,9 @@ class TenVadSegmenter:
         self._in_speech = False
         self._silence_frames = 0
         self._resume_frames = 0
+        # Frames since anything LOUD arrived. The watchdog that guarantees a
+        # turn always ends - see the in-speech branch of process().
+        self._quiet_frames = 0
         # Learned continuously while nobody is speaking, so the onset bar
         # tracks the actual room rather than a number guessed at a desk.
         self._noise_rms: float | None = None
@@ -118,6 +121,7 @@ class TenVadSegmenter:
                     return VadUpdate(probability=probability)
 
                 self._in_speech = True
+                self._quiet_frames = 0
                 # Pre-roll first, then the candidate frames that confirmed the
                 # onset: together they are the caller's true first syllable.
                 self._utterance = list(self._pre_roll) + self._candidate
@@ -137,20 +141,41 @@ class TenVadSegmenter:
 
         if speaking:
             self._utterance.append(frame.copy())
-            # Only a SUSTAINED run restarts the endpoint countdown. A single
-            # blip inside the silence window used to reset it outright, which
-            # is how background noise held a turn open indefinitely.
-            self._resume_frames += 1
-            if self._resume_frames >= self.settings.vad_resume_frames:
-                self._silence_frames = 0
+            # LOUDNESS DECIDES WHAT COUNTS AS STILL TALKING. The flag alone is
+            # not enough: once the agent has spoken, residual echo and the
+            # browser's gain control produce long runs of flagged frames out of
+            # an empty room, and those runs kept restarting the countdown - the
+            # microphone then stayed open until the 30 s cap. Observed live.
+            #
+            # A frame that is merely flagged is KEPT in the utterance (audio is
+            # never discarded) but does not restart anything.
+            if self._loud_enough_to_open_a_turn(self._rms(frame)):
+                self._quiet_frames = 0
+                # Only a SUSTAINED run restarts the endpoint countdown. A
+                # single blip used to reset it outright, which is the other way
+                # background noise held a turn open.
+                self._resume_frames += 1
+                if self._resume_frames >= self.settings.vad_resume_frames:
+                    self._silence_frames = 0
+            else:
+                self._quiet_frames += 1
+                self._resume_frames = 0
             if len(self._utterance) >= self.settings.max_utterance_frames:
                 return self._finish(probability, "max_duration")
+            if self._quiet_frames >= self.settings.vad_quiet_endpoint_frames:
+                # Nothing loud for 704 ms. Whatever the VAD thinks it can hear,
+                # the caller has stopped talking to us.
+                return self._finish(probability, "silence")
             return VadUpdate(probability=probability, speech_frame=True)
 
         self._resume_frames = 0
         self._silence_frames += 1
+        self._quiet_frames += 1
         self._utterance.append(frame.copy())  # keep the trailing silence
-        if self._silence_frames >= self.settings.endpoint_silence_frames:
+        if (
+            self._silence_frames >= self.settings.endpoint_silence_frames
+            or self._quiet_frames >= self.settings.vad_quiet_endpoint_frames
+        ):
             return self._finish(probability, "silence")
         return VadUpdate(probability=probability)
 
@@ -184,6 +209,7 @@ class TenVadSegmenter:
         self._in_speech = False
         self._silence_frames = 0
         self._resume_frames = 0
+        self._quiet_frames = 0
         self._pre_roll.clear()
         return VadUpdate(
             probability=probability,

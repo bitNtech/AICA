@@ -436,3 +436,96 @@ def test_a_billing_dispute_is_not_mistaken_for_an_angry_escalation() -> None:
     to whatever noun follows them.
     """
     assert detect_intent("Discharge bill-ல ஒரு charge ரெண்டு தடவை போட்டுருக்கீங்க") == "billing.query"
+
+
+# --- exemplars must not TEACH the agent to parrot ---
+
+# The idiom every exemplar uses when the agent reads a slot back on purpose.
+_NOTED_DOWN = "குறிச்சுக்கிட்டேன்" 
+
+
+def test_no_exemplar_repeats_a_callers_sentence_back_at_them() -> None:
+    """Reported live: every reply restated what the caller had just said.
+
+        CALLER  Ortho department
+        AGENT   Ortho department-க்கு வேணும் சார். உங்க பேரு சொல்லுங்க?
+
+    Worse, when the ASR mangled a word the agent said the mangled word ALOUD
+    ("ஏம்பேறு நரேன் சார்"). runtime_core.txt already forbids this in prose and
+    the model broke it anyway - prose has never fixed a behaviour on this model.
+    What fixed it was the exemplar: its department answer was not bare, so it
+    never demonstrated the case, and the model generalised the read-back it saw
+    on the phone number to every turn.
+
+    READING BACK AN IDENTIFIER IS CORRECT AND MUST SURVIVE. Confirming
+    "90045 33218, குறிச்சுக்கிட்டேன்" is what a desk should do. So a caller
+    turn carrying digits is exempt; a plain sentence is not.
+    """
+    import json
+
+    exemplars = json.loads(_EXEMPLARS.read_text(encoding="utf-8"))
+    words = re.compile(r"[\w஀-௿]+")
+    offenders = []
+
+    for intent, turns in exemplars.items():
+        if intent.startswith("_"):
+            continue
+        previous_caller = None
+        for speaker, text in turns:
+            if speaker == "caller":
+                previous_caller = text
+                continue
+            if previous_caller is None:
+                continue
+            caller_words = [w.lower() for w in words.findall(previous_caller)]
+            # An identifier read-back is correct behaviour, not parroting.
+            if any(any(ch.isdigit() for ch in w) for w in caller_words):
+                previous_caller = None
+                continue
+            if len(caller_words) < 3:
+                previous_caller = None
+                continue
+            # A deliberate read-back is not parroting. The exemplars mark one
+            # with "குறிச்சுக்கிட்டேன்" ("I've noted that down") - confirming a
+            # slot the desk has just recorded, which is exactly what a hospital
+            # desk should do with a date or a number. Restating the caller's
+            # sentence with no such acknowledgement is the defect.
+            if _NOTED_DOWN in text:
+                previous_caller = None
+                continue
+            said = {w.lower() for w in words.findall(text)}
+            repeated = sum(1 for w in caller_words if w in said) / len(caller_words)
+            if repeated >= 0.6:
+                offenders.append(f"{intent}: {repeated:.0%} of {previous_caller!r} -> {text!r}")
+            previous_caller = None
+
+    assert not offenders, "exemplars that teach parroting:\n  " + "\n  ".join(offenders)
+
+
+def test_the_appointment_exemplar_demonstrates_a_bare_answer() -> None:
+    """The specific gap that caused it: the caller's department answer carried
+    extra information, so a BARE answer was never demonstrated and the model
+    had no example of acknowledging one in two words."""
+    import json
+
+    turns = json.loads(_EXEMPLARS.read_text(encoding="utf-8"))["appointment.book"]
+    pairs = [
+        (turns[i][1], turns[i + 1][1])
+        for i in range(len(turns) - 1)
+        if turns[i][0] == "caller" and turns[i + 1][0] == "agent"
+    ]
+    bare = [
+        (c, a)
+        for c, a in pairs
+        # Digits are exempt for the same reason as above: confirming a number
+        # back to the caller is correct, not parroting.
+        if len(re.findall(r"[\w஀-௿]+", c)) <= 2 and not any(ch.isdigit() for ch in c)
+    ]
+    assert bare, "no bare one-word caller answer is demonstrated anywhere in this flow"
+
+    for caller, agent in bare:
+        said = {w.lower() for w in re.findall(r"[\w஀-௿]+", agent)}
+        for word in re.findall(r"[\w஀-௿]+", caller):
+            assert word.lower() not in said, (
+                f"the exemplar repeats the bare answer {caller!r} back as {agent!r}"
+            )

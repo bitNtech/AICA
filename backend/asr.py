@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 import numpy as np
 
@@ -32,6 +33,17 @@ class IndicConformerAsr:
     def __init__(self, settings: AudioSettings) -> None:
         self.settings = settings
         self._model = None
+        # THE DECODER IS SHARED MUTABLE STATE ON THE MODEL OBJECT.
+        # transcribe_partial() flips `cur_decoder` to ctc and back while the
+        # final rnnt decode may be running on the same object from another
+        # thread - main.py runs interim decodes during an utterance and the
+        # final one the moment it ends. The race surfaces as KeyError('logits')
+        # and the caller's whole turn is lost. Observed live.
+        #
+        # An RLock rather than a Lock: transcribe_partial() holds it across a
+        # try/finally that restores the decoder, and re-entering from the same
+        # thread must not deadlock.
+        self._inference_lock = threading.RLock()
 
     @property
     def ready(self) -> bool:
@@ -97,12 +109,13 @@ class IndicConformerAsr:
         # no temp WAV write, no soundfile decode, no unlink per utterance.
         # verbose=False drops the per-call tqdm bar. transcribe() is already
         # wrapped in torch.no_grad() by NeMo.
-        result = self._model.transcribe(
-            [self._normalize(samples)],
-            batch_size=1,
-            language_id=language,
-            verbose=False,
-        )
+        with self._inference_lock:
+            result = self._model.transcribe(
+                [self._normalize(samples)],
+                batch_size=1,
+                language_id=language,
+                verbose=False,
+            )
         return self._unwrap(result)
 
     def transcribe_raw(self, samples: np.ndarray, language: str) -> str:
@@ -153,16 +166,17 @@ class IndicConformerAsr:
         # cur_decoder is the same mechanism load() uses to select rnnt vs
         # ctc for transcribe() - flip it to ctc for just this call, then put
         # it back so transcribe()'s configured decoding mode is untouched.
-        previous_decoder = getattr(self._model, "cur_decoder", self.settings.decoding)
-        self._model.cur_decoder = "ctc"
-        try:
-            result = self._model.transcribe(
-                [self._normalize(samples)],
-                batch_size=1,
-                language_id=language,
-                verbose=False,
-            )
-        finally:
-            self._model.cur_decoder = previous_decoder
+        with self._inference_lock:
+            previous_decoder = getattr(self._model, "cur_decoder", self.settings.decoding)
+            self._model.cur_decoder = "ctc"
+            try:
+                result = self._model.transcribe(
+                    [self._normalize(samples)],
+                    batch_size=1,
+                    language_id=language,
+                    verbose=False,
+                )
+            finally:
+                self._model.cur_decoder = previous_decoder
 
         return self._unwrap(result)

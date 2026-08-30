@@ -71,6 +71,23 @@ class AudioSettings:
     vad_onset_min_rms: float = float(os.getenv("VAD_ONSET_MIN_RMS", "200"))
     vad_onset_snr: float = float(os.getenv("VAD_ONSET_SNR", "3.0"))
 
+    # THE WATCHDOG. A turn ends when nothing LOUD has arrived for this long,
+    # whatever the VAD is flagging. 44 x 16 ms = 704 ms.
+    #
+    # Without it a turn can be held open forever, and this is not theoretical:
+    # the endpoint countdown is restarted by any sustained run of flagged
+    # frames, and once the agent has spoken once, residual echo and the
+    # browser's automatic gain control produce exactly such runs out of an
+    # empty room. Observed live - the first turn of a call endpointed normally
+    # and every turn after it listened until the 30 s hard cap.
+    #
+    # Deliberately TWICE endpoint_silence_frames, not equal to it. Setting the
+    # two equal would make a quiet flagged frame identical to silence, which is
+    # the reverted behaviour that cut turns off mid-word. Double gives a
+    # trailing syllable room to be quiet without giving noise room to hold the
+    # microphone open. Someone actually speaking refreshes this constantly.
+    vad_quiet_endpoint_frames: int = int(os.getenv("VAD_QUIET_ENDPOINT_FRAMES", "44"))
+
     # How fast the learned room-noise floor follows the room. Updated only
     # while no turn is open AND the VAD says the frame is not speech, so a
     # caller talking can never raise the bar against themselves.
@@ -159,6 +176,11 @@ class AudioSettings:
             raise ValueError("ASR_MAX_CONCURRENCY must be positive")
         if self.vad_start_frames <= 0 or self.vad_resume_frames <= 0:
             raise ValueError("VAD_START_FRAMES and VAD_RESUME_FRAMES must be positive")
+        if self.vad_quiet_endpoint_frames <= self.endpoint_silence_frames:
+            raise ValueError(
+                "VAD_QUIET_ENDPOINT_FRAMES must exceed VAD_ENDPOINT_SILENCE_FRAMES - "
+                "equal makes a quiet syllable indistinguishable from silence"
+            )
         if self.vad_onset_min_rms < 0 or self.vad_onset_snr < 1:
             raise ValueError("VAD_ONSET_MIN_RMS must be >= 0 and VAD_ONSET_SNR must be >= 1")
         if not 0 < self.vad_noise_ema <= 1:

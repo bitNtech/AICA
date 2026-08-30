@@ -155,6 +155,22 @@ model into VRAM. That is a cold-start cost, gone by the second call, and
   nothing is clipped), and `vad_resume_frames` consecutive hops are needed to
   restart the endpoint countdown - resetting it on a single hop is what let
   background noise hold the microphone open indefinitely.
+- **A turn always ends, unconditionally — that is the watchdog.** Reported
+  live: the FIRST turn of a call endpointed normally and every turn after it
+  listened until the 30 s cap. Cause: the endpoint countdown is restarted by
+  any sustained run of VAD-flagged frames, and once the agent has spoken,
+  residual echo plus the browser's automatic gain control produce exactly such
+  runs out of an empty room — so the countdown never completed. The flag alone
+  cannot tell echo from speech; loudness can. A flagged frame now only
+  restarts the countdown if it is also LOUD, and `vad_quiet_endpoint_frames`
+  (704 ms of nothing loud) ends the turn regardless. Quiet frames are still
+  KEPT in the utterance — audio is never discarded, only the countdown is
+  affected. Guarded by
+  `test_a_turn_always_ends_even_if_the_vad_never_stops_flagging_speech`.
+  The watchdog is deliberately **twice** `endpoint_silence_frames`: equal would
+  make a quiet syllable mean the same thing as silence, which is the reverted
+  behaviour that cut turns off mid-word. `settings.py` refuses to start if the
+  two are set equal.
 - **Loudness gates turn ONSET, and only onset.** `vad_onset_min_rms` and
   `vad_onset_snr` are read in exactly one place — the not-yet-in-speech branch
   of `process()` — so a television or a conversation across the room cannot

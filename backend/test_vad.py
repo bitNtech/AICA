@@ -219,6 +219,8 @@ if __name__ == "__main__":
     test_a_quiet_syllable_can_never_end_a_turn_that_is_already_open()
     test_the_onset_bar_adapts_to_a_noisy_room()
     test_a_talking_caller_never_raises_the_bar_against_themselves()
+    test_a_turn_always_ends_even_if_the_vad_never_stops_flagging_speech()
+    test_a_caller_who_keeps_talking_never_trips_the_watchdog()
     test_max_duration_forces_endpoint()
     test_peek_utterance_is_none_before_speech_starts()
     test_peek_utterance_returns_speech_so_far_without_consuming_it()
@@ -273,22 +275,35 @@ def test_a_quiet_syllable_can_never_end_a_turn_that_is_already_open() -> None:
     onset, endpoint = settings.vad_start_frames, settings.endpoint_silence_frames
     whisper = int(settings.vad_onset_min_rms // 10)   # far below the onset floor
 
-    segmenter = _make_segmenter([1] * (onset + 40) + [0] * (endpoint + 1))
+    # Flags: speech through the loud opening, the quiet trail and the
+    # spoken-up recovery; then genuine non-speech for the closing silence.
+    segmenter = _make_segmenter(
+        [1] * (onset + endpoint + settings.vad_resume_frames) + [0] * (endpoint + 5)
+    )
     # Open the turn at a normal speaking level.
     for _ in range(onset):
         assert not segmenter.process(_frame(SPOKEN)).speech_ended
     assert segmenter.in_speech
 
     # Now trail off. Every frame is still FLAGGED as speech, just very quiet -
-    # exactly what the end of a Tamil word sounds like.
-    for _ in range(40):
+    # exactly what the end of a Tamil word sounds like. A quiet passage as long
+    # as the whole silence window must not end the turn: if it did, quiet and
+    # silent would mean the same thing, which is the reverted behaviour.
+    for _ in range(endpoint):
         update = segmenter.process(_frame(whisper))
         assert not update.speech_ended, "a quiet syllable ended the turn mid-word"
         assert update.speech_frame, "a quiet syllable inside a turn was scored as silence"
 
-    # The turn still ends normally on real silence.
+    # Speaking up again clears the countdown completely, so the turn continues.
+    for _ in range(settings.vad_resume_frames):
+        update = segmenter.process(_frame(SPOKEN))
+        assert not update.speech_ended
+
+    # And it still ends normally on real silence.
     for _ in range(endpoint):
         update = segmenter.process(_frame(ROOM))
+        if update.speech_ended:
+            break
     assert update.speech_ended and update.end_reason == "silence"
 
 
@@ -319,3 +334,55 @@ def test_a_talking_caller_never_raises_the_bar_against_themselves() -> None:
         segmenter.process(_frame(SPOKEN * 3))
 
     assert segmenter.noise_floor < SPOKEN, "loud speech was learned as room noise"
+
+
+def test_a_turn_always_ends_even_if_the_vad_never_stops_flagging_speech() -> None:
+    """THE hang. Reported live: the first turn endpointed, every turn after it
+    listened indefinitely.
+
+    Once the agent has spoken, residual echo and the browser's automatic gain
+    control produce long runs of VAD-flagged frames out of an empty room. The
+    endpoint countdown is restarted by any sustained run of them, so it never
+    completed and the microphone stayed open to the 30 s hard cap.
+
+    The watchdog is what makes termination unconditional: nothing LOUD for
+    `vad_quiet_endpoint_frames` ends the turn, whatever the VAD is flagging.
+    """
+    settings = AudioSettings()
+    onset = settings.vad_start_frames
+    echo = int(settings.vad_onset_min_rms // 4)
+
+    segmenter = _make_segmenter([1] * 4000)
+    for _ in range(onset):
+        segmenter.process(_frame(SPOKEN))
+    assert segmenter.in_speech
+
+    # Flagged as speech forever, but never loud: pure echo/room noise.
+    ended = None
+    for index in range(settings.max_utterance_frames):
+        update = segmenter.process(_frame(echo))
+        if update.speech_ended:
+            ended = (index, update)
+            break
+
+    assert ended is not None, "the turn never ended - the microphone hung open"
+    index, update = ended
+    assert update.end_reason == "silence"
+    assert index < settings.vad_quiet_endpoint_frames + 2, (
+        f"took {index} frames to give up; the watchdog is {settings.vad_quiet_endpoint_frames}"
+    )
+    # Nothing was thrown away: the audio is still there for the ASR to judge.
+    assert update.samples is not None and len(update.samples) > 0
+
+
+def test_a_caller_who_keeps_talking_never_trips_the_watchdog() -> None:
+    """The watchdog must be invisible to anyone actually speaking."""
+    settings = AudioSettings()
+    segmenter = _make_segmenter([1] * 4000)
+    for _ in range(settings.vad_start_frames):
+        segmenter.process(_frame(SPOKEN))
+
+    # Ten seconds of real speech, far past the watchdog window.
+    for _ in range(settings.vad_quiet_endpoint_frames * 6):
+        update = segmenter.process(_frame(SPOKEN))
+        assert not update.speech_ended, "the watchdog cut off a caller who was still talking"

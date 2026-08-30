@@ -23,7 +23,7 @@ import time
 AUDIBLE_TAIL_SECONDS = 0.35
 
 
-def is_probably_self_echo(transcript: str, agent_text: str, threshold: float = 0.6) -> bool:
+def is_probably_self_echo(transcript: str, agent_text: str, threshold: float = 0.75) -> bool:
     """Whether `transcript` is the agent hearing itself through the speakers.
 
     Echo cancellation in the browser is enabled and mostly works, but what
@@ -31,13 +31,24 @@ def is_probably_self_echo(transcript: str, agent_text: str, threshold: float = 0
     transcribes to real words, so "is the transcript empty" does not catch it.
     What does catch it is that the words are the ones the agent just said.
 
-    Deliberately a containment test rather than a similarity ratio: the ASR
-    mangles its own re-heard audio, dropping and merging words, so the echo is
-    usually a SUBSET of what was said rather than a close match of the whole.
-    Requiring most of the caller's words to have just come out of the agent's
-    mouth is the property that separates the two.
+    THE HARD PART IS NOT DETECTING ECHO, IT IS NOT DETECTING A REPLY. A caller
+    answering a question reuses the question's words - that is what answering
+    is. Measured live: the agent asked "எந்த department-க்கு வேணும்?" and the
+    caller said "Cardiology department வேணும் சார்", which is 3 of 4 words the
+    agent had just said. Word overlap alone threw the caller's answer away.
 
-    A short transcript is never judged an echo. "\u0b86\u0bae\u0bbe\u0bae\u0bcd" ("yes") is one word,
+    What separates them is NEW CONTENT. An answer carries the thing being
+    answered - "Cardiology" - while echo is the agent's own sentence coming
+    back with nothing added. So a transcript is echo only when it is BOTH
+    mostly the agent's words AND brings essentially nothing of its own.
+
+    Deliberately a containment test rather than a similarity ratio: the ASR
+    mangles its own re-heard audio, dropping and merging words, so echo is
+    usually a SUBSET of what was said rather than a close match of the whole.
+    That is also why one unmatched word is tolerated - a garbled echo often
+    produces one - but two mean the caller is saying something.
+
+    A short transcript is never judged an echo. "ஆமாம்" ("yes") is one word,
     it will appear in something the agent said sooner or later, and refusing
     to hear a caller say yes is far worse than occasionally acting on an echo.
     """
@@ -46,6 +57,17 @@ def is_probably_self_echo(transcript: str, agent_text: str, threshold: float = 0
         return False
     said = set(_WORDS_RE.findall(agent_text.lower()))
     if not said:
+        return False
+    if any(w not in said for w in words):
+        # The caller brought a word of their own. Whatever else this is, it is
+        # not the agent's sentence coming back.
+        #
+        # Zero tolerance on purpose, and the asymmetry is the point: missing an
+        # echo costs one wasted turn, while discarding a real answer loses what
+        # the caller actually said and they have to repeat themselves. Measured
+        # live, a one-word allowance was already enough to throw away
+        # "Cardiology department வேணும் சார்" - the answer to the agent's own
+        # question - because only "Cardiology" was new.
         return False
     return sum(1 for w in words if w in said) / len(words) >= threshold
 

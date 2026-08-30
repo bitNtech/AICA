@@ -163,3 +163,53 @@ if __name__ == "__main__":
     test_transcribe_partial_forces_ctc_regardless_of_configured_decoding()
     test_transcribe_partial_result_unwrapping_matches_transcribe()
     print("ok")
+
+
+def test_model_inference_is_serialized_across_threads() -> None:
+    """KeyError('logits'), observed live and reported by the user.
+
+    NeMo's hybrid model keeps its ACTIVE DECODER on the model object.
+    transcribe_partial() flips `cur_decoder` to ctc and back, while the final
+    rnnt decode can be running on the same object from another thread -
+    main.py starts interim decodes during an utterance and the final one the
+    moment it ends. Without a lock the two interleave, the decode fails, and
+    the caller's entire turn is lost.
+    """
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    class _ConcurrentModel(_FakeModel):
+        def __init__(self) -> None:
+            super().__init__(["வணக்கம்"])
+            self.active = 0
+            self.max_active = 0
+            self.decoders_seen: list = []
+            self.guard = threading.Lock()
+
+        def transcribe(self, audio, batch_size, language_id, verbose):
+            with self.guard:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                self.decoders_seen.append(getattr(self, "cur_decoder", None))
+            time.sleep(0.02)
+            with self.guard:
+                self.active -= 1
+            return self.result
+
+    asr = IndicConformerAsr(AudioSettings())
+    model = _ConcurrentModel()
+    asr._model = model
+    samples = np.ones(320, dtype=np.int16)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = []
+        for index in range(8):
+            target = asr.transcribe_partial if index % 2 else asr.transcribe
+            futures.append(pool.submit(target, samples, "ta"))
+        for future in futures:
+            future.result()
+
+    assert model.max_active == 1, (
+        f"{model.max_active} decodes ran at once - the decoder race is back"
+    )
