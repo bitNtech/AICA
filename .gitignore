@@ -44,3 +44,6 @@ finetune/*.gguf
 finetune/aruvi-merged/
 finetune/.venv/
 logs/
+
+# Build artefact of llm-package/ — regenerate rather than commit the zip.
+aruvi-llm-package.zip

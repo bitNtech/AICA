@@ -12,18 +12,97 @@ VAD, or TTS model.
 from __future__ import annotations
 
 import asyncio
+import re
+import time
+
+# How long after the last scheduled audio the agent may still be heard in the
+# room. The server knows exactly how much audio it has SENT, and the browser
+# schedules each clause after the previous one, so summing durations tracks
+# playback. This is the extra allowance for speaker-to-microphone travel and
+# for the client's own buffering.
+AUDIBLE_TAIL_SECONDS = 0.35
+
+
+def is_probably_self_echo(transcript: str, agent_text: str, threshold: float = 0.6) -> bool:
+    """Whether `transcript` is the agent hearing itself through the speakers.
+
+    Echo cancellation in the browser is enabled and mostly works, but what
+    leaks through is the agent's own sentence - and unlike background noise it
+    transcribes to real words, so "is the transcript empty" does not catch it.
+    What does catch it is that the words are the ones the agent just said.
+
+    Deliberately a containment test rather than a similarity ratio: the ASR
+    mangles its own re-heard audio, dropping and merging words, so the echo is
+    usually a SUBSET of what was said rather than a close match of the whole.
+    Requiring most of the caller's words to have just come out of the agent's
+    mouth is the property that separates the two.
+
+    A short transcript is never judged an echo. "\u0b86\u0bae\u0bbe\u0bae\u0bcd" ("yes") is one word,
+    it will appear in something the agent said sooner or later, and refusing
+    to hear a caller say yes is far worse than occasionally acting on an echo.
+    """
+    words = _WORDS_RE.findall(transcript.lower())
+    if len(words) < 3:
+        return False
+    said = set(_WORDS_RE.findall(agent_text.lower()))
+    if not said:
+        return False
+    return sum(1 for w in words if w in said) / len(words) >= threshold
+
+
+_WORDS_RE = re.compile(r"[\w\u0b80-\u0bff]+")
 
 
 class ActiveSpeech:
     """Holds at most one in-flight agent-speech task per call."""
 
-    def __init__(self, sustained_frames: int = 1) -> None:
+    def __init__(
+        self,
+        sustained_frames: int = 1,
+        sustained_frames_while_audible: int | None = None,
+        clock=time.monotonic,
+    ) -> None:
         self._task: asyncio.Task | None = None
         self._sustained_frames = max(1, sustained_frames)
+        # A much higher bar while the agent's own voice is still in the room.
+        # Residual echo of the agent talking looks exactly like sustained
+        # speech to a VAD - it IS sustained speech, just not the caller's - so
+        # a consecutive-frame gate alone cannot separate them. Demanding
+        # noticeably more evidence can: room noise and echo leak in bursts,
+        # while a caller who genuinely wants the floor keeps talking.
+        self._sustained_frames_while_audible = max(
+            self._sustained_frames, sustained_frames_while_audible or self._sustained_frames
+        )
         self._speech_frames = 0
+        self._clock = clock
+        # When the audio already sent will have finished playing. Mirrors the
+        # browser's own scheduling clock (playAt += clause duration).
+        self._audible_until = 0.0
 
     def set(self, task: asyncio.Task) -> None:
         self._task = task
+
+    @property
+    def audible(self) -> bool:
+        """Whether audio this server sent could still be coming out of a speaker."""
+        return self._clock() < self._audible_until + AUDIBLE_TAIL_SECONDS
+
+    def note_audio_sent(self, seconds: float) -> None:
+        """Record that `seconds` of agent audio has been handed to the client.
+
+        `agent_speaking_end` fires when the server finishes SENDING, which is
+        not when the caller stops hearing the agent: the client schedules each
+        clause after the previous one, so playback runs on for as long as the
+        buffered audio lasts. Tracking it the same way the client does is what
+        lets the server know its own voice is still in the room.
+        """
+        if seconds <= 0:
+            return
+        self._audible_until = max(self._audible_until, self._clock()) + seconds
+
+    def silence(self) -> None:
+        """The client has stopped playback, so nothing more will be heard."""
+        self._audible_until = 0.0
 
     def clear(self, task: asyncio.Task) -> None:
         """Clear only if `task` is still the tracked one (a superseded task's
@@ -47,9 +126,25 @@ class ActiveSpeech:
         if speech_started:
             self._speech_frames = 0
         if not speech_frame:
+            # THE RESET IS THE WHOLE GATE. Without it these frames only ever
+            # accumulate, so scattered background blips - a fan, a door, a
+            # keyboard - sum across seconds of silence and eventually cancel
+            # the agent although nobody spoke. Measured on real calls: 34 of
+            # 87 captured turns transcribed to the empty string, and each was
+            # free to reach this counter. The caller then hears the agent stop
+            # mid-sentence and stay stopped, because an empty transcript
+            # (correctly) starts no new turn - there is nothing to resume it.
+            #
+            # With the reset the gate means what it says: `sustained_frames`
+            # CONSECUTIVE flagged hops, 240 ms of unbroken speech. A real
+            # interjection clears that easily; noise essentially never does.
+            self._speech_frames = 0
             return False
         self._speech_frames += 1
-        if self._speech_frames != self._sustained_frames:
+        required = (
+            self._sustained_frames_while_audible if self.audible else self._sustained_frames
+        )
+        if self._speech_frames != required:
             return False
         return self.interrupt()
 
@@ -58,5 +153,8 @@ class ActiveSpeech:
         task = self._task
         if task is not None and not task.done():
             task.cancel()
+            # Cancelling stops the client's playback too, so the room goes
+            # quiet immediately - the remaining buffered audio is dropped.
+            self.silence()
             return True
         return False

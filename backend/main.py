@@ -16,9 +16,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 from .asr import IndicConformerAsr
-from .barge_in import ActiveSpeech
+from .barge_in import ActiveSpeech, is_probably_self_echo
 from .clause_chunker import ClauseChunker
-from .conversation import AgentClause, AgentTurn, CallControl, ConversationManager, ToolInvoked
+from .conversation import AgentClause, AgentTurn, ConversationManager
 from .llm import LlmClient
 from .persistence import CallEventStore
 from .settings import (
@@ -68,7 +68,6 @@ class ConversationTurnOutcome:
     """What one agent turn produced, once its speech has finished going out."""
 
     spoken: list[str] = field(default_factory=list)
-    call_control: CallControl | None = None
     interrupted: bool = False
 
 
@@ -298,25 +297,14 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
     # Tracks whichever speak() task is currently synthesizing/sending audio, so
     # queue_segment() can cancel it the moment the caller barges in - see
     # BACKEND_COMPLETION.md Sec3.2 and backend/barge_in.py.
-    active_speech = ActiveSpeech(settings.barge_in_speech_frames)
-
-    async def apply_call_control(control: CallControl) -> None:
-        """Act on a hangUp/transferCall the model made during the turn.
-
-        Runs only after the turn's speech has actually been sent, so the agent
-        is never cut off mid-goodbye by its own hang-up. The event goes out
-        before the close so a client can distinguish "the agent ended the call"
-        from "the socket dropped".
-        """
-        await send_event({"type": "call_control", "action": control.action, "detail": control.detail})
-        if control.action != "hang_up":
-            # A transfer is a telephony-side bridge this browser transport has
-            # no way to perform; the event above is what a real SIP leg (or the
-            # dashboard) acts on. Keep the socket open either way.
-            return
-        logger.info("agent ended the call: %s (%s)", connection_id, control.detail)
-        with suppress(WebSocketDisconnect, RuntimeError):
-            await websocket.close(code=1000)
+    active_speech = ActiveSpeech(
+        settings.barge_in_speech_frames, settings.barge_in_frames_while_audible
+    )
+    # The last thing the agent said out loud, kept so a transcript that is
+    # really the agent hearing itself can be recognised - see
+    # barge_in.is_probably_self_echo(). Only the most recent turn matters:
+    # echo arrives within seconds of being spoken.
+    recent_agent_text = ""
 
     async def synthesize_clause(clause: str) -> bytes | None:
         """Synthesize one clause to PCM bytes, or None if it produced no audio.
@@ -370,6 +358,7 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
         flight, so cancelling it stops both any further synthesis and, now,
         the LLM generation feeding it.
         """
+        nonlocal recent_agent_text
         outcome = ConversationTurnOutcome()
         started = False
         # Synthesis tasks in clause order, handed to a sender that runs
@@ -400,23 +389,19 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
                 if audio:
                     async with send_lock:
                         await websocket.send_bytes(audio)
+                    # int16 mono: 2 bytes per sample. Tracking how much audio
+                    # has been handed over is how the server knows its own
+                    # voice is still playing - agent_speaking_end fires when
+                    # SENDING finishes, which is well before the caller stops
+                    # hearing it.
+                    if tts.ready and tts.sample_rate:
+                        active_speech.note_audio_sent(len(audio) / 2 / tts.sample_rate)
 
         sender = asyncio.create_task(send_audio_in_order())
 
         try:
             async for item in clauses:
-                if isinstance(item, ToolInvoked):
-                    await send_event(
-                        {
-                            "type": "agent_tool_call",
-                            "name": item.name,
-                            "arguments": item.arguments,
-                            "result": item.result,
-                        }
-                    )
-                    continue
                 if isinstance(item, AgentTurn):
-                    outcome.call_control = item.call_control
                     if item.ungrounded:
                         # Reported, never silently swallowed: the caller has
                         # already heard these, so the only useful thing left is
@@ -445,6 +430,7 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
                         await send_event({"type": "agent_error", "message": TTS_UNAVAILABLE_MESSAGE})
 
                 outcome.spoken.append(item.text)
+                recent_agent_text = " ".join(outcome.spoken)
                 # Text first, always: the transcript must not lag the audio,
                 # and when TTS is unavailable this is the whole of the output.
                 await send_event({"type": "agent_clause", "text": item.text})
@@ -503,8 +489,6 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
 
                 if outcome.interrupted:
                     conversation.record_interrupted_turn(connection_id, " ".join(outcome.spoken))
-                elif outcome.call_control is not None:
-                    await apply_call_control(outcome.call_control)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -573,6 +557,16 @@ async def capture_browser_audio(websocket: WebSocket) -> None:
                 async with websocket.app.state.asr_semaphore:
                     transcript = await asyncio.to_thread(asr.transcribe, samples, segment_language)
                 transcript = transcript.strip()
+                if is_probably_self_echo(transcript, recent_agent_text):
+                    # The agent hearing itself through the speakers. Unlike
+                    # background noise this transcribes to real words, so the
+                    # empty-transcript check below cannot catch it - and acting
+                    # on it means the agent answering its own question.
+                    logger.info(
+                        "discarded self-echo for %s: %r", connection_id, transcript[:60]
+                    )
+                    await send_event({"type": "echo_discarded", "text": transcript})
+                    continue
                 await send_event(
                     {
                         "type": "transcript",

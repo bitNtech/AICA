@@ -14,9 +14,26 @@ from .vad import TenVadSegmenter
 
 HOP = 256
 
+# A frame's AMPLITUDE now matters as well as its VAD flag: loudness gates turn
+# ONSET (see AudioSettings.vad_onset_min_rms). Measured on real Tamil speech at
+# full digital level, a voiced 16 ms frame runs ~931 RMS at p10 and ~2624 at
+# p50, so SPOKEN is a realistic speaking level and ROOM is a quiet room.
+SPOKEN = 2600
+ROOM = 40
 
-def _frame(value: int = 100) -> np.ndarray:
+
+def _frame(value: int = SPOKEN) -> np.ndarray:
     return np.full(HOP, value, dtype=np.int16)
+
+
+def _frames_for(flags: list[int], loud: int = SPOKEN) -> list[np.ndarray]:
+    """One frame per flag: loud where the VAD says speech, quiet where it does not.
+
+    Sending a loud frame for a NON-speech flag would teach the noise floor that
+    the room is as loud as the caller, and onset would then never clear the SNR
+    bar - which is a property of the test rig, not of the code under test.
+    """
+    return [_frame(loud if flag else ROOM) for flag in flags]
 
 
 def _make_segmenter(flags: list[int], **overrides) -> TenVadSegmenter:
@@ -27,10 +44,10 @@ def _make_segmenter(flags: list[int], **overrides) -> TenVadSegmenter:
     return segmenter
 
 
-def _run(segmenter: TenVadSegmenter, flags: list[int]):
+def _run(segmenter: TenVadSegmenter, flags: list[int], loud: int = SPOKEN):
     update = None
-    for _ in flags:
-        update = segmenter.process(_frame())
+    for frame in _frames_for(flags, loud):
+        update = segmenter.process(frame)
         if update.speech_ended:
             break
     return update
@@ -44,45 +61,96 @@ def test_readme_hyperparameters_are_the_defaults() -> None:
     # in front of every reply, so it is part of the latency budget.
     assert settings.endpoint_silence_frames == 22
     assert settings.pre_roll_frames == 8
+    # Debounces. Flag-only, never energy - see AudioSettings.vad_start_frames.
+    assert settings.vad_start_frames == 4
+    assert settings.vad_resume_frames == 3
     assert (settings.language, settings.decoding) == ("ta", "rnnt")
 
 
 def test_pre_roll_is_prepended_to_utterance() -> None:
     pre_roll = 3
+    onset = AudioSettings().vad_start_frames
     silence = AudioSettings().endpoint_silence_frames
-    flags = [0, 0, 0, 1] + [0] * silence
+    flags = [0] * pre_roll + [1] * onset + [0] * silence
     segmenter = _make_segmenter(flags, pre_roll_frames=pre_roll)
 
     update = _run(segmenter, flags)
 
     assert update is not None and update.samples is not None
-    # pre-roll only fills while silent, so the utterance is
-    # pre-roll + the speech frame + the silent tail that ended the turn.
-    assert len(update.samples) == (pre_roll + 1 + silence) * HOP
+    # pre-roll only fills while silent, so the utterance is pre-roll + the
+    # frames that CONFIRMED the onset + the silent tail that ended the turn.
+    # The onset frames are kept, not discarded: confirming a turn must never
+    # cost the caller their first syllable.
+    assert len(update.samples) == (pre_roll + onset + silence) * HOP
 
 
 def test_mid_sentence_pause_shorter_than_endpoint_does_not_split() -> None:
     # 10 silent frames (160 ms) is a breath, not a turn end - it must stay
     # comfortably under endpoint_silence_frames or the ASR gets half a
     # sentence, which is the failure that caps how low that can be tuned.
-    endpoint = AudioSettings().endpoint_silence_frames
-    flags = [1] + [0] * 10 + [1] + [0] * endpoint
+    settings = AudioSettings()
+    endpoint = settings.endpoint_silence_frames
+    onset, resume = settings.vad_start_frames, settings.vad_resume_frames
+    flags = [1] * onset + [0] * 10 + [1] * resume + [0] * endpoint
     segmenter = _make_segmenter(flags)
 
     update = _run(segmenter, flags)
 
     assert update is not None and update.samples is not None
-    assert len(update.samples) == (1 + 10 + 1 + endpoint) * HOP
+    assert len(update.samples) == (onset + 10 + resume + endpoint) * HOP
 
 
-def test_short_blip_is_still_transcribed() -> None:
-    # The reference pipeline has no minimum-speech gate: every turn goes to ASR.
-    flags = [1, 1] + [0] * AudioSettings().endpoint_silence_frames
+def test_a_blip_shorter_than_the_onset_debounce_never_opens_a_turn() -> None:
+    """The 39%-empty-transcript bug: background noise opening real turns.
+
+    Measured over the 87 captured turns in call_events.db, 34 transcribed to
+    the EMPTY STRING - the VAD had opened a turn on noise, the ASR ran on it,
+    and those frames were free to reach the barge-in gate and cancel the agent
+    mid-sentence.
+    """
+    settings = AudioSettings()
+    blip = settings.vad_start_frames - 1
+    flags = [1] * blip + [0] * (settings.endpoint_silence_frames + 2)
+    segmenter = _make_segmenter(flags)
+
+    updates = [segmenter.process(f) for f in _frames_for(flags)]
+
+    assert not any(u.speech_started for u in updates), "noise opened a turn"
+    assert not any(u.speech_frame for u in updates), "a blip fed the barge-in gate"
+    assert segmenter.in_speech is False
+    assert segmenter.flush() is None
+
+
+def test_a_confirmed_turn_still_reaches_asr_with_no_minimum_length_gate() -> None:
+    """The debounce may DELAY a turn; it must never discard one."""
+    settings = AudioSettings()
+    flags = [1] * settings.vad_start_frames + [0] * settings.endpoint_silence_frames
     segmenter = _make_segmenter(flags)
 
     update = _run(segmenter, flags)
 
     assert update is not None and update.speech_ended and update.samples is not None
+
+
+def test_an_isolated_blip_cannot_hold_the_microphone_open() -> None:
+    """The stuck-mic bug: one noisy frame per silence window, turn never ends.
+
+    Resetting the endpoint countdown on a SINGLE flagged hop meant background
+    noise recurring anywhere inside the 352 ms window kept the turn open
+    indefinitely - which is why a caller ends up toggling their microphone by
+    hand after they have finished speaking.
+    """
+    settings = AudioSettings()
+    tail: list[int] = []
+    for _ in range(settings.endpoint_silence_frames * 3):
+        tail += [0, 0, 0, 1]
+    flags = [1] * settings.vad_start_frames + tail
+    segmenter = _make_segmenter(flags)
+
+    update = _run(segmenter, flags)
+
+    assert update is not None and update.speech_ended, "noise held the turn open"
+    assert update.end_reason == "silence"
 
 
 def test_max_duration_forces_endpoint() -> None:
@@ -102,23 +170,25 @@ def test_peek_utterance_is_none_before_speech_starts() -> None:
 
 
 def test_peek_utterance_returns_speech_so_far_without_consuming_it() -> None:
-    segmenter = _make_segmenter([1, 1, 1])
-    segmenter.process(_frame())
-    segmenter.process(_frame())
+    onset = AudioSettings().vad_start_frames
+    segmenter = _make_segmenter([1] * (onset + 2))
+    for _ in range(onset):
+        segmenter.process(_frame())
 
     assert segmenter.in_speech is True
     peeked = segmenter.peek_utterance()
-    assert peeked is not None and len(peeked) == 2 * HOP
+    assert peeked is not None and len(peeked) == onset * HOP
 
     # A second peek and a further process() must see the same/growing buffer,
     # proving peek_utterance() never mutates or drains state.
-    assert segmenter.peek_utterance() is not None and len(segmenter.peek_utterance()) == 2 * HOP
+    assert len(segmenter.peek_utterance()) == onset * HOP
     segmenter.process(_frame())
-    assert len(segmenter.peek_utterance()) == 3 * HOP
+    assert len(segmenter.peek_utterance()) == (onset + 1) * HOP
 
 
 def test_peek_utterance_is_none_again_once_the_turn_ends() -> None:
-    flags = [1, 1] + [0] * AudioSettings().endpoint_silence_frames
+    settings = AudioSettings()
+    flags = [1] * settings.vad_start_frames + [0] * settings.endpoint_silence_frames
     segmenter = _make_segmenter(flags)
     _run(segmenter, flags)
 
@@ -127,8 +197,9 @@ def test_peek_utterance_is_none_again_once_the_turn_ends() -> None:
 
 
 def test_flush_emits_in_progress_utterance_and_resets() -> None:
-    segmenter = _make_segmenter([1, 1, 1])
-    for _ in range(3):
+    onset = AudioSettings().vad_start_frames
+    segmenter = _make_segmenter([1] * onset)
+    for _ in range(onset):
         segmenter.process(_frame())
 
     update = segmenter.flush()
@@ -140,10 +211,111 @@ if __name__ == "__main__":
     test_readme_hyperparameters_are_the_defaults()
     test_pre_roll_is_prepended_to_utterance()
     test_mid_sentence_pause_shorter_than_endpoint_does_not_split()
-    test_short_blip_is_still_transcribed()
+    test_a_blip_shorter_than_the_onset_debounce_never_opens_a_turn()
+    test_a_confirmed_turn_still_reaches_asr_with_no_minimum_length_gate()
+    test_an_isolated_blip_cannot_hold_the_microphone_open()
+    test_quiet_background_speech_never_opens_a_turn()
+    test_someone_actually_talking_to_the_microphone_still_opens_a_turn()
+    test_a_quiet_syllable_can_never_end_a_turn_that_is_already_open()
+    test_the_onset_bar_adapts_to_a_noisy_room()
+    test_a_talking_caller_never_raises_the_bar_against_themselves()
     test_max_duration_forces_endpoint()
     test_peek_utterance_is_none_before_speech_starts()
     test_peek_utterance_returns_speech_so_far_without_consuming_it()
     test_peek_utterance_is_none_again_once_the_turn_ends()
     test_flush_emits_in_progress_utterance_and_resets()
     print("ok")
+
+
+# --- loudness at ONSET, and the rule that it may never end a turn ---
+
+
+def test_quiet_background_speech_never_opens_a_turn() -> None:
+    """A television, a fan, a conversation across the room.
+
+    The VAD flags these as speech - they ARE speech, just not addressed to us -
+    so the flag alone cannot reject them. Loudness can.
+    """
+    settings = AudioSettings()
+    flags = [1] * (settings.vad_start_frames + 6) + [0] * 4
+    segmenter = _make_segmenter(flags)
+
+    # Flagged as speech the whole way, but far below the onset floor.
+    quiet = int(settings.vad_onset_min_rms // 3)
+    updates = [segmenter.process(_frame(quiet)) for _ in flags]
+
+    assert not any(u.speech_started for u in updates), "quiet background opened a turn"
+    assert not any(u.speech_frame for u in updates), "quiet background fed the barge-in gate"
+    assert segmenter.in_speech is False
+
+
+def test_someone_actually_talking_to_the_microphone_still_opens_a_turn() -> None:
+    """The gate must reject the room, not the caller."""
+    settings = AudioSettings()
+    flags = [1] * settings.vad_start_frames + [0] * settings.endpoint_silence_frames
+    segmenter = _make_segmenter(flags)
+
+    update = _run(segmenter, flags)
+
+    assert update is not None and update.speech_ended and update.samples is not None
+
+
+def test_a_quiet_syllable_can_never_end_a_turn_that_is_already_open() -> None:
+    """THE regression guard. This is the bug that reverted the last attempt.
+
+    An energy gate applied to every frame scored a quiet trailing syllable as
+    silence, so the endpoint countdown ran on through the middle of a word and
+    turns came back as one-character transcripts ("ந", "ப", "க"). Loudness is
+    therefore read in exactly one place - the not-yet-in-speech branch. Once a
+    turn is open, only the VAD flag decides when it ends.
+    """
+    settings = AudioSettings()
+    onset, endpoint = settings.vad_start_frames, settings.endpoint_silence_frames
+    whisper = int(settings.vad_onset_min_rms // 10)   # far below the onset floor
+
+    segmenter = _make_segmenter([1] * (onset + 40) + [0] * (endpoint + 1))
+    # Open the turn at a normal speaking level.
+    for _ in range(onset):
+        assert not segmenter.process(_frame(SPOKEN)).speech_ended
+    assert segmenter.in_speech
+
+    # Now trail off. Every frame is still FLAGGED as speech, just very quiet -
+    # exactly what the end of a Tamil word sounds like.
+    for _ in range(40):
+        update = segmenter.process(_frame(whisper))
+        assert not update.speech_ended, "a quiet syllable ended the turn mid-word"
+        assert update.speech_frame, "a quiet syllable inside a turn was scored as silence"
+
+    # The turn still ends normally on real silence.
+    for _ in range(endpoint):
+        update = segmenter.process(_frame(ROOM))
+    assert update.speech_ended and update.end_reason == "silence"
+
+
+def test_the_onset_bar_adapts_to_a_noisy_room() -> None:
+    """A fixed number cannot be right for every microphone, so the bar is a
+    multiple of the room level the segmenter has actually measured."""
+    settings = AudioSettings()
+    noisy = settings.vad_onset_min_rms * 2
+    segmenter = _make_segmenter([0] * 60 + [1] * 40)
+
+    # Sixty frames of a room noticeably louder than the absolute floor.
+    for _ in range(60):
+        segmenter.process(_frame(int(noisy)))
+    assert segmenter.noise_floor > settings.vad_onset_min_rms
+
+    # Speech only a little above that room is now rejected, where against a
+    # quiet room the same level would have opened a turn.
+    just_above = int(noisy * 1.2)
+    assert just_above > settings.vad_onset_min_rms
+    updates = [segmenter.process(_frame(just_above)) for _ in range(40)]
+    assert not any(u.speech_started for u in updates)
+
+
+def test_a_talking_caller_never_raises_the_bar_against_themselves() -> None:
+    """The noise floor learns only from frames the VAD calls non-speech."""
+    segmenter = _make_segmenter([1] * 50)
+    for _ in range(50):
+        segmenter.process(_frame(SPOKEN * 3))
+
+    assert segmenter.noise_floor < SPOKEN, "loud speech was learned as room noise"

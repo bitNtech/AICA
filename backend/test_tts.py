@@ -149,6 +149,17 @@ async def _immediate(value):
     return value
 
 
+def _audio_bytes(waveform, sample_rate: int) -> bytes:
+    """A decodable body for the stubbed engine. WAV, not MP3: synthesize()
+    hands whatever it got straight to soundfile, which sniffs the format, and
+    WAV needs no libsndfile MP3 encoder to exist on the test machine."""
+    import soundfile
+
+    buffer = io.BytesIO()
+    soundfile.write(buffer, waveform, sample_rate, format="WAV", subtype="PCM_16")
+    return buffer.getvalue()
+
+
 def test_synthesize_returns_int16_pcm_at_the_decoded_rate(monkeypatch) -> None:
     tts = EdgeTts(TtsSettings(engine="edge", language="ta"))
     tts.load()
@@ -216,7 +227,7 @@ def test_a_stalled_endpoint_gives_up_instead_of_hanging_the_turn(monkeypatch) ->
     import types
 
     class _Stalling:
-        def __init__(self, text, voice) -> None:
+        def __init__(self, text, voice, rate=None) -> None:
             pass
 
         async def stream(self):
@@ -236,3 +247,220 @@ def test_a_stalled_endpoint_gives_up_instead_of_hanging_the_turn(monkeypatch) ->
     elapsed = time.perf_counter() - started
     # One timeout, not two: retrying a stall just stalls again.
     assert elapsed < 1.0, f"gave up after {elapsed:.2f}s, timeout was 0.2s"
+
+
+def test_a_repeated_clause_is_not_refetched_so_the_greeting_survives_a_dead_link(monkeypatch) -> None:
+    """Every call speaks the same four greeting clauses and the same holding
+    line. Re-fetching them is both 0.9s of avoidable latency per call and the
+    reason a caller gets no voice at all the moment the endpoint stalls."""
+    import sys
+    import types
+
+    fetches: list[str] = []
+
+    class _Counting:
+        def __init__(self, text, voice, rate=None) -> None:
+            fetches.append(text)
+
+        async def stream(self):
+            yield {"type": "audio", "data": _audio_bytes(np.array([0.5], dtype=np.float32), 24_000)}
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_Counting))
+    tts = EdgeTts(TtsSettings(engine="edge", language="ta"))
+    tts._voice = "ta-IN-PallaviNeural"
+
+    first = tts.synthesize("வணக்கம்", "ta")
+    second = tts.synthesize("வணக்கம்", "ta")
+
+    assert fetches == ["வணக்கம்"], f"the endpoint was hit {len(fetches)} times for one clause"
+    assert second.samples.tolist() == first.samples.tolist()
+
+
+def test_a_clause_truncated_by_the_timeout_keeps_its_audio_and_is_never_cached(monkeypatch) -> None:
+    """A stall part-way through the body used to throw away every byte that had
+    already arrived. Keeping them is a clipped word instead of silence - but a
+    clipped clause must never be served again from cache."""
+    import sys
+    import types
+
+    body = _audio_bytes(np.array([0.5, -0.5, 0.25, -0.25], dtype=np.float32), 24_000)
+
+    class _StallsMidBody:
+        def __init__(self, text, voice, rate=None) -> None:
+            pass
+
+        async def stream(self):
+            yield {"type": "audio", "data": body}
+            await asyncio.sleep(5)  # never delivers the rest
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_StallsMidBody))
+    tts = EdgeTts(TtsSettings(timeout_seconds=0.2))
+    tts._voice = "ta-IN-PallaviNeural"
+
+    result = tts.synthesize("வணக்கம்", "ta")
+
+    assert result.samples.size > 0, "the bytes that arrived before the deadline were discarded"
+    assert tts._mp3_cache == {}, "a truncated clause was cached and will be replayed clipped forever"
+
+
+def test_an_english_word_glued_to_a_tamil_suffix_still_reaches_the_voice() -> None:
+    """Reported live: "the TTS is not reading english words".
+
+    Written Tamil-English code-mix glues an English word to its Tamil case
+    suffix with a hyphen - "Cardiology-ல", "department-க்கு" - and the prompt
+    teaches that style, so it is in almost every reply. The Tamil neural voice
+    silently DROPS the English half of such a token. Measured by voiced-audio
+    duration (total duration is useless - edge pads short clips to ~1.78s):
+
+        department          0.68s   spoken
+        department-க்கு      0.30s   the English word is GONE
+        department க்கு      0.80s   spoken
+
+    Splitting that one hyphen restored 51-60% more voiced audio on real agent
+    lines. It is speech-only: the transcript keeps the hyphen.
+    """
+    from .tts import speakable
+
+    assert speakable("Cardiology-ல appointment") == "Cardiology ல appointment"
+    assert speakable("எந்த department-க்கு வேணும்?") == "எந்த department க்கு வேணும்?"
+    assert speakable("Desk-ல இருந்து") == "Desk ல இருந்து"
+
+    # Latin-to-Latin hyphens are real words, not case suffixes - leave them be.
+    assert speakable("pre-auth follow-up co-pay") == "pre-auth follow-up co-pay"
+    # ...and an identifier must survive intact or the caller hears a wrong ID.
+    assert speakable("IP-2025-91043") == "IP-2025-91043"
+
+
+def test_the_voice_is_given_the_speakable_text_not_the_written_text(monkeypatch) -> None:
+    """The transform is worthless if synthesize() forgets to apply it."""
+    import sys
+    import types
+
+    seen: list[str] = []
+
+    class _Recording:
+        def __init__(self, text, voice, rate=None) -> None:
+            seen.append(text)
+
+        async def stream(self):
+            yield {"type": "audio", "data": _audio_bytes(np.array([0.5], dtype=np.float32), 24_000)}
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_Recording))
+    tts = EdgeTts(TtsSettings(engine="edge", language="ta"))
+    tts._voice = "ta-IN-PallaviNeural"
+
+    tts.synthesize("Cardiology-ல appointment book பண்ணணும்", "ta")
+
+    assert seen == ["Cardiology ல appointment book பண்ணணும்"], (
+        f"the engine was handed {seen!r} - the English word will be dropped"
+    )
+
+
+def test_the_configured_speaking_rate_reaches_the_engine(monkeypatch) -> None:
+    """The default voice is slow enough to read as a recording. Measured on a
+    real reply: +0% is 6.12s of audio, +15% is 5.33s, +25% is 4.92s. +15% is
+    brisk without rushing, which matters when callers are elderly or anxious.
+
+    It is also a latency win - every turn finishes sooner - so a rate that
+    silently fails to reach edge would be an invisible regression."""
+    import sys
+    import types
+
+    seen: dict[str, object] = {}
+
+    class _Recording:
+        def __init__(self, text, voice, rate=None) -> None:
+            seen["rate"] = rate
+
+        async def stream(self):
+            yield {"type": "audio", "data": _audio_bytes(np.array([0.5], dtype=np.float32), 24_000)}
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=_Recording))
+    tts = EdgeTts(TtsSettings(engine="edge", language="ta", rate="+20%"))
+    tts._voice = "ta-IN-PallaviNeural"
+
+    tts.synthesize("வணக்கம்", "ta")
+
+    assert seen["rate"] == "+20%", f"edge was given rate={seen['rate']!r}"
+
+
+def test_a_malformed_rate_is_rejected_at_startup_not_mid_call() -> None:
+    """edge rejects anything that is not exactly +N%/-N%, and it does so on the
+    first synthesis - i.e. mid-call, as silence."""
+    import pytest
+
+    for bad in ("fast", "15%", "+15", "++15%"):
+        with pytest.raises(ValueError):
+            TtsSettings(rate=bad)
+
+
+# --- edge's silence padding, which the caller hears as a gap after every '.' ---
+#
+# Measured on real agent clauses at +15%: every clip opens with ~0.17s of
+# silence and a SHORT clip is padded out to exactly 1.78s however brief it is
+# ("சரி சார்." = 0.72s of speech, 0.16s in front, 0.90s behind). Clauses are
+# synthesized separately and played back to back, so that padding accumulates
+# at precisely the clause boundaries. Trimming those six clauses took the turn
+# from 15.44s of audio to 12.30s.
+
+
+def _padded_clip(sample_rate: int, lead: float, speech: float, trail: float) -> np.ndarray:
+    """Silence, then a tone, then silence - the shape edge actually returns."""
+    tone = 0.6 * np.sin(
+        2 * np.pi * 220 * np.arange(int(speech * sample_rate)) / sample_rate
+    ).astype(np.float32)
+    return np.concatenate(
+        [
+            np.zeros(int(lead * sample_rate), dtype=np.float32),
+            tone,
+            np.zeros(int(trail * sample_rate), dtype=np.float32),
+        ]
+    )
+
+
+def test_the_gap_after_a_full_stop_is_trimmed_to_the_configured_pause(monkeypatch) -> None:
+    rate = 24_000
+    settings = TtsSettings(engine="edge", language="ta")
+    tts = EdgeTts(settings)
+    tts.load()
+    _stub_mp3(monkeypatch, tts, _padded_clip(rate, lead=0.16, speech=0.72, trail=0.90), rate)
+
+    result = tts.synthesize("சரி சார்.", "ta")
+
+    duration = len(result.samples) / result.sample_rate
+    expected = settings.clause_lead_seconds + 0.72 + settings.clause_pause_seconds
+    # One 20ms detection frame of slack at each edge.
+    assert abs(duration - expected) < 0.05, f"{duration:.3f}s, expected ~{expected:.3f}s"
+    # The whole point: what used to be ~1.06s of dead air between clauses is now
+    # one deliberate pause.
+    assert duration < 1.78
+
+
+def test_trimming_never_eats_the_speech_itself(monkeypatch) -> None:
+    """A trim that clipped the attack of a word would be worse than the gap."""
+    rate = 24_000
+    settings = TtsSettings(engine="edge", language="ta")
+    tts = EdgeTts(settings)
+    tts.load()
+    _stub_mp3(monkeypatch, tts, _padded_clip(rate, lead=0.16, speech=0.72, trail=0.90), rate)
+
+    result = tts.synthesize("சரி சார்.", "ta")
+
+    loud = np.flatnonzero(np.abs(result.samples.astype(np.float32) / 32767.0) > 0.01)
+    voiced = (loud[-1] - loud[0] + 1) / result.sample_rate
+    assert voiced >= 0.70, f"only {voiced:.3f}s of the 0.72s of speech survived"
+    # And the lead-in is kept, not cut flush - cutting flush clips a plosive.
+    assert loud[0] > 0
+
+
+def test_an_all_silent_clip_is_left_alone(monkeypatch) -> None:
+    """A silent clause is a TTS failure, not something to turn into an empty array."""
+    rate = 24_000
+    tts = EdgeTts(TtsSettings(engine="edge", language="ta"))
+    tts.load()
+    silence = np.zeros(int(0.5 * rate), dtype=np.float32)
+    _stub_mp3(monkeypatch, tts, silence, rate)
+
+    result = tts.synthesize("சரி சார்.", "ta")
+
+    assert len(result.samples) == int(0.5 * rate)

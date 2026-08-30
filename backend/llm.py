@@ -66,7 +66,7 @@ class LlmClient:
         self._client = AsyncOpenAI(base_url=self.settings.base_url, api_key=self.settings.api_key)
         logger.info("LLM client configured for %s at %s", self.settings.model, self.settings.base_url)
 
-    async def complete(self, messages: list[dict], tools: list[dict]) -> LlmReply:
+    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LlmReply:
         """Run one chat completion and return the whole reassembled reply.
 
         Convenience wrapper over stream() for callers that have nothing useful
@@ -79,7 +79,7 @@ class LlmClient:
                 return event.reply
         raise RuntimeError("LLM stream ended without a ReplyComplete event")
 
-    async def stream(self, messages: list[dict], tools: list[dict], max_tokens: int | None = None):
+    async def stream(self, messages: list[dict], tools: list[dict] | None = None, max_tokens: int | None = None):
         """Yield assistant text as it arrives, then the reassembled reply.
 
         This is what makes clause-level TTS possible (BACKEND_COMPLETION.md
@@ -100,11 +100,14 @@ class LlmClient:
         if self._client is None:
             raise RuntimeError("LLM client is not loaded")
 
+        # Omitted entirely, not passed as [] - an empty tools array still
+        # makes some servers emit the tool-calling scaffolding into the
+        # prompt, which is the 1778 tokens this agent stopped paying for.
+        optional = {"tools": tools, "tool_choice": "auto"} if tools else {}
         stream = await self._client.chat.completions.create(
             model=self.settings.model,
             messages=messages,
-            tools=tools,
-            tool_choice="auto",
+            **optional,
             temperature=self.settings.temperature,
             max_tokens=max_tokens or self.settings.max_tokens,
             stream=True,

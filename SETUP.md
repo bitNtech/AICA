@@ -46,7 +46,10 @@ HF account and a license you have to accept yourself:
 `ollama serve` needs to be running and reachable at `.env`'s `LLM_BASE_URL`, with the
 model in `LLM_MODEL` already pulled (`ollama pull <tag>`).
 
-`run.sh` is a quick-start alternative that assumes deps are already installed: it starts
+`./run.sh` does all of the above in one command - see README.md. The rest of this file
+is the manual walkthrough, for when you need to change something in the middle of it.
+
+The older description of `run.sh` follows: it starts
 this backend plus [`legacy_test_client/`](legacy_test_client/), a minimal static HTML/JS
 page for exercising `/ws/audio` directly without the React dashboard.
 
@@ -125,10 +128,10 @@ alone, no code changes). Between those two, **Qwen2.5-Instruct is the better fit
 - This is a Tamil/English code-mixed hospital call agent — Qwen2.5's tokenizer and
   training mix cover non-Latin scripts noticeably more broadly than Llama 3.1's, whose
   officially supported languages don't include Tamil at all.
-- `backend/llm.py` requires real OpenAI-style streaming tool-call deltas
-  (`tool_choice="auto"`, 22 tools from `golden/main_prompt.txt`) — Qwen2.5 has solid,
-  widely-used tool-calling support. Check a model's tag on
-  [ollama.com/library](https://ollama.com/library) for the "Tools" badge before relying
+- `backend/llm.py` streams plain chat completions; the agent has no tool layer, so a
+  model does NOT need the "Tools" badge on
+  [ollama.com/library](https://ollama.com/library). What it does need is Tamil
+  fluency and instruction-following at 4B. Check a model's tag before relying
   on it here.
 
 **Pick a size by hardware** (rule of thumb — VRAM needs scale roughly with parameter
@@ -137,7 +140,7 @@ have):
 
 | Hardware | Model tag | Notes |
 |---|---|---|
-| CPU-only / <6GB VRAM | `qwen2.5:3b` | Already `.env`'s default. Fast, but weaker Tamil fluency and less reliable tool-calling discipline across the 22 tools — expect more failed golden flows. |
+| CPU-only / <6GB VRAM | `qwen2.5:3b` | Fast, but weaker Tamil fluency and prone to degenerate repetition — expect a worse `register_eval` score. |
 | 6–8GB VRAM | **`qwen2.5:7b`** (recommended default) | Best balance for this domain at MVP scale. |
 | 12GB+ VRAM | `qwen2.5:14b` | Noticeably better instruction-following on the harder flows (emergency escalation, multi-step booking); higher per-turn latency. |
 | 24GB+ VRAM / cloud | `qwen2.5:32b`, or move to vLLM/TGI for a served 7B–14B | Only worth it once you have concurrent calls to serve — `BACKEND_COMPLETION.md` §3.5 already flags Ollama/single-process as a later scaling limit, not an MVP one. |
@@ -145,13 +148,17 @@ have):
 **Don't just trust this table — validate it against your own prompt and flows:**
 
 ```bash
-python -m backend.scripts.golden_eval
+LLM_TEMPERATURE=0 python -m backend.scripts.register_eval
+LLM_TEMPERATURE=0 python -m backend.scripts.safety_eval
 ```
 
-This replays all 20 `golden/flows/flow_*.txt` scenarios against whatever
-`LLM_BASE_URL`/`LLM_MODEL` you have configured and reports which ones fired the
-correct tool. Re-run it any time you switch models — it's the real signal for *this*
-prompt and tool set, not a generic multilingual benchmark.
+`register_eval` scores the Tamil/English register on scenarios that appear NOWHERE in
+`golden/`, so a model that merely memorised the twenty flows scores badly; `safety_eval`
+checks the three clinical refusals hold under repeated pressure. Run both at
+`LLM_TEMPERATURE=0` — at the 0.3 product default the same prompt scored 9/14, 13/14 and
+9/14 in one sitting, noise wider than any change worth measuring.
+Re-run them any time you switch models — it's the real signal for *this* prompt, not a
+generic multilingual benchmark.
 
 ### Test console — `http://localhost:8000/console`
 
@@ -167,7 +174,7 @@ It shows live readiness for socket / conversation / voice / speech-to-text, and 
 you two ways in:
 
 - **Typed turns** — uses the socket's `user_text` path, which skips only VAD/ASR and
-  drives the identical conversation → LLM → tool → TTS chain a spoken turn does. This
+  drives the identical conversation → LLM → TTS chain a spoken turn does. This
   works **without `HF_TOKEN` or the NeMo fork**, which is the part most likely to be
   missing on a fresh machine.
 - **Microphone** — the full VAD → ASR path. Enabled only when ASR actually loaded.

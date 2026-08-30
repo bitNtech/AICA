@@ -79,8 +79,11 @@ class _ScriptedLlm:
 
     def __init__(self, replies: list[LlmReply]) -> None:
         self._replies = list(replies)
+        # Real caller turns only - a prewarm is not the model being asked
+        # anything, and counting it would hide a turn that never happened.
+        self.turns: list[list[dict]] = []
 
-    async def stream(self, messages, tools, max_tokens=None):
+    async def stream(self, messages, tools=None, max_tokens=None):
         # ConversationManager.prewarm() asks for a single token purely to make
         # the server evaluate the prompt into its cache, and throws the output
         # away. Modelled here so a prewarm does not silently eat the reply the
@@ -88,6 +91,7 @@ class _ScriptedLlm:
         if max_tokens == 1:
             yield ReplyComplete(LlmReply(content=""))
             return
+        self.turns.append([dict(m) for m in messages])
         reply = self._replies.pop(0)
         for index in range(0, len(reply.content), 7):
             yield TextDelta(reply.content[index : index + 7])
@@ -186,6 +190,25 @@ _VALID_CALL_STARTED = {
     "channels": 1,
     "language": "ta",
 }
+
+
+# Loudness gates turn ONSET (AudioSettings.vad_onset_min_rms), so scripted VAD
+# flags are no longer enough on their own - the PCM behind a "speech" frame has
+# to actually be at a speaking level. Zero-filled audio now (correctly) opens
+# no turn at all, which is the point of the gate.
+_SPOKEN_SAMPLE = 2600
+_ROOM_SAMPLE = 40
+
+
+def _audio_for(flags: list[int]) -> bytes:
+    """PCM matching the scripted flags: speaking level where the VAD says speech."""
+    import numpy as np
+
+    hop = AudioSettings().vad_hop_size
+    frames = [
+        np.full(hop, _SPOKEN_SAMPLE if flag else _ROOM_SAMPLE, dtype="<i2") for flag in flags
+    ]
+    return np.concatenate(frames).tobytes()
 
 
 def _drain_agent_turn(ws) -> list[dict]:
@@ -413,10 +436,12 @@ def test_speech_turn_flows_through_vad_asr_conversation_tts() -> None:
     _set_app_state(asr=asr, tts=tts, llm=llm)
     client = TestClient(app)
 
-    # One speech frame, then enough silence (endpoint_silence_frames=30) to close the turn.
-    flags = [1] + [0] * 31
-    frame_bytes = AudioSettings().vad_hop_size * 2  # int16 = 2 bytes/sample
-    audio = b"\x00" * (frame_bytes * len(flags))
+    # Enough speech frames to clear the onset debounce (vad_start_frames), then
+    # enough silence to close the turn. Both read from settings rather than
+    # hard-coded, so tuning either knob cannot silently stop exercising a turn.
+    _s = AudioSettings()
+    flags = [1] * _s.vad_start_frames + [0] * (_s.endpoint_silence_frames + 1)
+    audio = _audio_for(flags)
 
     with _scripted_vad(flags):
         with client.websocket_connect("/ws/audio") as ws:
@@ -453,9 +478,8 @@ def test_long_utterance_emits_partial_transcripts_before_the_turn_ends() -> None
     # PARTIAL_TRANSCRIPT_INTERVAL_FRAMES is 30 - 65 speech frames guarantees
     # at least one interim decode fires while still mid-utterance, before the
     # trailing silence closes the turn.
-    flags = [1] * 65 + [0] * 31
-    frame_bytes = AudioSettings().vad_hop_size * 2
-    audio = b"\x00" * (frame_bytes * len(flags))
+    flags = [1] * 65 + [0] * (AudioSettings().endpoint_silence_frames + 1)
+    audio = _audio_for(flags)
 
     with _scripted_vad(flags):
         with client.websocket_connect("/ws/audio") as ws:
@@ -483,14 +507,82 @@ def test_long_utterance_emits_partial_transcripts_before_the_turn_ends() -> None
     assert transcript["type"] == "transcript" and transcript["text"] == "final text"
 
 
+def test_the_agent_hearing_itself_does_not_become_a_caller_turn() -> None:
+    """Mic left open, speakers on: the agent's own sentence leaks back in.
+
+    Unlike background noise this transcribes to REAL WORDS, so the
+    empty-transcript check cannot catch it - and acting on it means the agent
+    answering its own question. The greeting is what has just been said, so a
+    transcript made of the greeting's own words is an echo by construction.
+    """
+    echo = "வணக்கம் அருவி ஹாஸ்பிட்டல் உங்களுக்கு எப்படி help பண்ணலாம்"
+    asr = _FakeAsr(transcript=echo)
+    llm = _ScriptedLlm([LlmReply(content="இது ஒருபோதும் பேசப்படக்கூடாது")])
+    _set_app_state(asr=asr, llm=llm)
+    client = TestClient(app)
+
+    _s = AudioSettings()
+    flags = [1] * _s.vad_start_frames + [0] * (_s.endpoint_silence_frames + 1)
+    audio = _audio_for(flags)
+
+    with _scripted_vad(flags):
+        with client.websocket_connect("/ws/audio") as ws:
+            _next_json(ws)                      # ready
+            ws.send_json(_VALID_CALL_STARTED)
+            _next_json(ws)                      # pipeline_configured
+            _drain_agent_turn(ws)               # greeting
+
+            ws.send_bytes(audio)
+            _next_json(ws)                      # vad_start
+            event = _next_json(ws)
+            while event["type"] not in {"echo_discarded", "transcript"}:
+                event = _next_json(ws)
+
+    assert event["type"] == "echo_discarded", (
+        f"the agent's own words came back as a {event['type']} event"
+    )
+    assert event["text"] == echo
+    # The decisive one: nothing was sent to the model, so the agent cannot
+    # have answered itself.
+    assert llm.turns == [], "the agent started a turn in reply to its own voice"
+
+
+def test_a_real_caller_turn_is_still_heard_while_the_agent_is_speaking() -> None:
+    """The echo guard must not deafen the agent to an actual caller."""
+    asr = _FakeAsr(transcript="எனக்கு Cardiology-ல appointment book பண்ணணும்")
+    llm = _ScriptedLlm([LlmReply(content="கண்டிப்பா சார்.")])
+    _set_app_state(asr=asr, llm=llm)
+    client = TestClient(app)
+
+    _s = AudioSettings()
+    flags = [1] * _s.vad_start_frames + [0] * (_s.endpoint_silence_frames + 1)
+    audio = _audio_for(flags)
+
+    with _scripted_vad(flags):
+        with client.websocket_connect("/ws/audio") as ws:
+            _next_json(ws)
+            ws.send_json(_VALID_CALL_STARTED)
+            _next_json(ws)
+            _drain_agent_turn(ws)
+
+            ws.send_bytes(audio)
+            event = _next_json(ws)
+            while event["type"] not in {"echo_discarded", "transcript"}:
+                event = _next_json(ws)
+            assert event["type"] == "transcript", "a real caller turn was thrown away as echo"
+            _drain_agent_turn(ws)
+
+    assert llm.turns, "the caller's turn never reached the model"
+
+
 def test_asr_not_ready_reports_asr_error_instead_of_transcript() -> None:
     asr = _FakeAsr(ready=False)
     _set_app_state(asr=asr)
     client = TestClient(app)
 
-    flags = [1] + [0] * 31
-    frame_bytes = AudioSettings().vad_hop_size * 2
-    audio = b"\x00" * (frame_bytes * len(flags))
+    _s = AudioSettings()
+    flags = [1] * _s.vad_start_frames + [0] * (_s.endpoint_silence_frames + 1)
+    audio = _audio_for(flags)
 
     with _scripted_vad(flags):
         with client.websocket_connect("/ws/audio") as ws:
@@ -522,5 +614,7 @@ if __name__ == "__main__":
     test_auth_accepts_connection_with_correct_token()
     test_speech_turn_flows_through_vad_asr_conversation_tts()
     test_long_utterance_emits_partial_transcripts_before_the_turn_ends()
+    test_the_agent_hearing_itself_does_not_become_a_caller_turn()
+    test_a_real_caller_turn_is_still_heard_while_the_agent_is_speaking()
     test_asr_not_ready_reports_asr_error_instead_of_transcript()
     print("ok")

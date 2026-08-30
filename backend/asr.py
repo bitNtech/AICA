@@ -3,8 +3,11 @@
 Uses the same model and decoder as the reference live-mic pipeline: the hybrid
 CTC/RNNT `.nemo` checkpoint loaded through the AI4Bharat NeMo fork
 (`pip install -e ./NeMo_ai4bharat --no-deps`) - vanilla `nemo-toolkit` cannot
-load its multilingual tokenizer. Transcripts stay in the model's native script
-(Tamil speech -> Tamil text); nothing is romanized on the way out.
+load its multilingual tokenizer.
+
+The model emits Tamil script only, so English hospital words come back
+transliterated and dictated numbers come back as number words. Both are
+rewritten on the way out by transcript_norm.py - see _unwrap().
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import os
 import numpy as np
 
 from .settings import AudioSettings
+from .transcript_norm import normalize_transcript
 
 logger = logging.getLogger("aica.asr")
 
@@ -60,12 +64,21 @@ class IndicConformerAsr:
 
     @staticmethod
     def _unwrap(result) -> str:
+        """Flatten NeMo's nested result, then put it in the agent's register.
+
+        This model has a Tamil character vocabulary, so an English hospital
+        word can only come back transliterated ("appointment" ->
+        "அப்பாயின்மென்ட்") and a dictated phone number comes back as Tamil
+        NUMBER WORDS. Both are rewritten here rather than at one call site, so
+        the interim transcript, the final transcript, the browser socket and
+        the telephony leg all get the same text - see transcript_norm.py.
+        """
         # NeMo returns a list of strings, sometimes nested per decoder.
         while isinstance(result, (list, tuple)):
             if not result:
                 return ""
             result = result[0]
-        return str(result).strip()
+        return normalize_transcript(str(result).strip())
 
     def transcribe(self, samples: np.ndarray, language: str) -> str:
         """Return a native-script transcript for one 16 kHz mono int16 segment.
@@ -91,6 +104,30 @@ class IndicConformerAsr:
             verbose=False,
         )
         return self._unwrap(result)
+
+    def transcribe_raw(self, samples: np.ndarray, language: str) -> str:
+        """The model's own output, with NO transcript normalisation applied.
+
+        Only backend/scripts/build_asr_lexicon.py wants this. That script
+        builds the normaliser's lexicon by round-tripping English words through
+        TTS and back through this model, so it must see what the model
+        actually emitted - feeding it normalised text would make the result
+        depend on how much the normaliser already knows, and the lexicon would
+        stop growing at whatever it happened to cover already.
+        """
+        if self._model is None:
+            raise RuntimeError("ASR model is not loaded")
+        result = self._model.transcribe(
+            [self._normalize(samples)],
+            batch_size=1,
+            language_id=language,
+            verbose=False,
+        )
+        while isinstance(result, (list, tuple)):
+            if not result:
+                return ""
+            result = result[0]
+        return str(result).strip()
 
     def transcribe_partial(self, samples: np.ndarray, language: str) -> str:
         """Fast interim transcript for a rolling, not-yet-endpointed buffer.

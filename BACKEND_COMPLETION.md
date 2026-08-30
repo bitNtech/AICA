@@ -31,7 +31,7 @@ rest of this document as a design log, not a status report.
 | Barge-in | Done | `backend/barge_in.py` + `queue_segment` in `main.py`. Cancelling now also cancels the LLM generation, and the truncated turn is recorded so the model knows what the caller actually heard. |
 | 8 kHz resampling for telephony | Done | `backend/audio_transcode.py`, used by the telephony leg on both directions. |
 | SIP / WebRTC to a real phone | Adapter only, **out of scope** | `backend/telephony.py` is a code-complete, unit-tested Twilio-Media-Streams-shaped adapter that has never been connected to a trunk. Live telephony is explicitly out of scope; testing is manual through the console. |
-| Golden-flow evaluation | Done | `backend/scripts/golden_eval.py` (tool correctness over the 20 flows), `register_eval.py` (register + grounding on **unseen** scenarios), `safety_eval.py` (the three clinical refusals under escalating pressure), `e2e_check.py` (a running server, spoken + typed). Run the first two with `LLM_TEMPERATURE=0`: at the 0.3 default a 14-turn register_eval run varies by 4 turns between runs of the *same* prompt, which is wider than any prompt change measured so far. |
+| Golden-flow evaluation | Done | `register_eval.py` (register + grounding on **unseen** scenarios), `safety_eval.py` (the three clinical refusals under escalating pressure), `e2e_check.py` (a running server, spoken + typed). Run the first two with `LLM_TEMPERATURE=0`: at the 0.3 default a 14-turn register_eval run varies by 4 turns between runs of the *same* prompt, which is wider than any prompt change measured so far. |
 | Persistence / call history | Done | `backend/persistence.py` (SQLite, optional Fernet encryption) plus `GET /api/calls`, `GET /api/calls/{id}`, `GET /api/health`. Writes go through a background queue so a disk write can never stall speech. |
 | Grounding enforcement | **New, not in the original plan** | `backend/grounding.py`. See below. |
 
@@ -194,7 +194,7 @@ reach this system. Two realistic paths, pick one for v1:
   framing (SIP media stream payload vs raw WS bytes) and the resampling step above.
 
 ### 3.4 Streaming ASR (upgrade from utterance-final)
-Currently ASR only runs *after* `vad_end` closes a turn (`main.py` lines ~91-99). For a natural
+ASR runs *after* `vad_end` closes a turn. For a natural
 phone conversation you generally want at least **partial/interim transcripts** so the
 Conversation Manager can start reasoning before the caller finishes a long sentence, especially
 given the golden prompt allows longish turns from callers. This is a real rework, not a small
@@ -207,7 +207,8 @@ options:
    `ASR_DECODING=ctc`, see `settings.py`) is fast enough to run incrementally on a rolling buffer
    for interim results, while the more accurate RNNT decode still runs once at `vad_end` for the
    final transcript sent to the LLM. This is meaningfully more complex — recommend deferring
-   until v1 latency is measured and found wanting.
+   until v1 latency is measured and found wanting. This is now implemented and on by default;
+   measured on real calls, ASR is not where the latency is (see HANDOFF.md §4).
 
 ### 3.5 Concurrency: the ASR lock will bottleneck the whole call center
 `main.py` uses one `app.state.asr_lock` shared across **all** concurrent WebSocket connections

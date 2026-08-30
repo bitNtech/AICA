@@ -48,6 +48,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import io
 import logging
+import re
 
 import numpy as np
 
@@ -66,6 +67,92 @@ class SynthesisResult:
 # adding a perceptible stall to a turn that was going to fail anyway.
 EDGE_ATTEMPTS = 2
 EDGE_RETRY_DELAY_SECONDS = 0.4
+
+# Repeated clause text is the common case here, not a rare one worth
+# optimising for: EVERY call opens with the same four greeting clauses and
+# every silent tool turn says the same holding line. Caching the fetched MP3
+# makes those instant (measured 0.89s -> 0s for the greeting) and, more
+# importantly, makes them survive the endpoint being unreachable - which is
+# the failure that otherwise leaves a caller with no voice at all.
+#
+# ponytail: in-memory and unbounded-LRU-free - a plain dict with a cap, since
+# a call's vocabulary of repeated lines is tiny. Persist it to disk if the
+# greeting must also survive a cold start on a dead link.
+EDGE_CACHE_MAX_ENTRIES = 64
+
+# Written Tamil-English code-mix glues an English word to its Tamil case
+# suffix with a hyphen - "Cardiology-ல", "department-க்கு", "bill-ல" - and the
+# prompt teaches exactly that style, so it is in almost every reply.
+#
+# The Tamil neural voice SILENTLY DROPS the English half of such a token.
+# Measured, voiced-audio duration (total duration is useless here, edge pads
+# every short clip to ~1.78s):
+#
+#     department          0.68s   spoken
+#     department-க்கு      0.30s   the English word is GONE, only "க்கு" is said
+#     department க்கு      0.80s   spoken
+#     Cardiology          0.82s   spoken
+#     Cardiology-ல         0.28s   GONE
+#     Cardiology ல         1.10s   spoken
+#
+# So the hyphen, not the script mixing, is what breaks it. Replacing just that
+# one hyphen with a space restores the word. This is a SPEECH-ONLY transform:
+# the transcript, the call log and the model's own history keep the hyphen,
+# which is how the language is actually written.
+#
+# Latin-to-Latin hyphens ("pre-auth", "co-pay", "follow-up") are untouched -
+# the pattern requires a Tamil character on the right-hand side.
+_LATIN_TAMIL_HYPHEN_RE = re.compile(r"([A-Za-z0-9])-(?=[\u0b80-\u0bff])")
+
+
+def speakable(text: str) -> str:
+    """Rewrite one clause into what the voice can actually pronounce."""
+    return _LATIN_TAMIL_HYPHEN_RE.sub(r"\1 ", text)
+
+
+def trim_padding(
+    samples: np.ndarray,
+    sample_rate: int,
+    lead_seconds: float,
+    pause_seconds: float,
+    threshold: float,
+) -> np.ndarray:
+    """Cut edge's silent padding down to one deliberate inter-clause pause.
+
+    Edge returns every clip padded, and a SHORT clip is padded hardest -
+    measured, a clause is padded out to exactly 1.78s however brief it is, so
+    "சரி சார்." arrives as 0.72s of speech behind 0.16s of silence
+    and in front of 0.90s more. A turn's clauses are synthesized separately and
+    played back to back, so all of that padding lands at the clause boundaries
+    and the caller hears a long gap after every full stop.
+
+    Detects speech on 20ms frame peaks rather than a per-sample threshold: a
+    single sample crossing it mid-silence would otherwise defeat the whole
+    trim, and Tamil word-final vowels trail off quietly enough that a
+    per-sample test on a soft frame reads as speech.
+
+    Returns the input untouched if nothing crosses the threshold - a clause
+    that is genuinely all silence is a TTS failure, and this is not the place
+    to turn it into an empty array the sender would treat differently.
+    """
+    if samples.size == 0:
+        return samples
+
+    frame = max(1, int(sample_rate * 0.02))
+    usable = samples.size // frame * frame
+    if usable == 0:
+        return samples
+
+    peaks = np.abs(samples[:usable].astype(np.float32) / 32767.0).reshape(-1, frame).max(axis=1)
+    voiced = np.flatnonzero(peaks > threshold)
+    if voiced.size == 0:
+        return samples
+
+    start = max(0, int((voiced[0] * frame) - lead_seconds * sample_rate))
+    end = min(samples.size, int((voiced[-1] + 1) * frame))
+    pause = np.zeros(int(pause_seconds * sample_rate), dtype=samples.dtype)
+    return np.concatenate([samples[start:end], pause])
+
 
 # Microsoft's neural voices for the languages settings.py already accepts.
 # Female by default: the golden transcripts are written around a woman at the
@@ -112,6 +199,10 @@ class EdgeTts:
     def __init__(self, settings: TtsSettings) -> None:
         self.settings = settings
         self._voice: str | None = None
+        # text -> complete MP3 body. Only ever written from the success path
+        # in _stream_mp3(), never from the partial-on-timeout one, so a
+        # clipped clause can't be served for the rest of the process's life.
+        self._mp3_cache: dict[str, bytes] = {}
         # edge streams MP3; libsndfile 1.2+ decodes it, and every clip so far
         # has come back at 24 kHz. Read from the decoder rather than assumed,
         # since main.py tells the client the rate before the first clause.
@@ -140,7 +231,7 @@ class EdgeTts:
             raise RuntimeError(f"no edge voice mapped for language {self.settings.language!r}")
 
         self._voice = voice
-        logger.info("edge TTS ready: voice=%s", voice)
+        logger.info("edge TTS ready: voice=%s rate=%s", voice, self.settings.rate)
 
     def synthesize(self, text: str, language: str) -> SynthesisResult:
         if self._voice is None:
@@ -150,7 +241,7 @@ class EdgeTts:
         if not text:
             return SynthesisResult(np.array([], dtype=np.int16), self._sample_rate)
 
-        mp3 = _run_blocking(self._stream_mp3(text))
+        mp3 = _run_blocking(self._stream_mp3(speakable(text)))
         if not mp3:
             logger.warning("edge TTS returned no audio for %r", text[:60])
             return SynthesisResult(np.array([], dtype=np.int16), self._sample_rate)
@@ -161,6 +252,15 @@ class EdgeTts:
         self._sample_rate = int(sample_rate)
         mono = waveform.mean(axis=1)
         samples = (np.clip(mono, -1.0, 1.0) * 32767).astype(np.int16)
+        # After decode, not before: the MP3 cache stores the body edge sent, so
+        # the same clip stays reusable if the pause is ever retuned.
+        samples = trim_padding(
+            samples,
+            self._sample_rate,
+            self.settings.clause_lead_seconds,
+            self.settings.clause_pause_seconds,
+            self.settings.silence_threshold,
+        )
         return SynthesisResult(samples=samples, sample_rate=self._sample_rate)
 
     async def _stream_mp3(self, text: str) -> bytes:
@@ -177,21 +277,40 @@ class EdgeTts:
         """
         import edge_tts
 
+        cached = self._mp3_cache.get(text)
+        if cached is not None:
+            return cached
+
         timeout = self.settings.timeout_seconds
         last_error: Exception | None = None
         for attempt in range(EDGE_ATTEMPTS):
+            # Outside the try: a timeout must be able to keep whatever already
+            # arrived. MP3 is a stream of independent frames, so a truncated
+            # body still decodes to the part of the clause that got through -
+            # a clipped word is worth more to a caller than silence, and the
+            # old code threw all of it away.
+            chunks = bytearray()
             try:
                 async with asyncio.timeout(timeout):
-                    chunks = bytearray()
-                    async for chunk in edge_tts.Communicate(text, self._voice).stream():
+                    stream = edge_tts.Communicate(text, self._voice, rate=self.settings.rate).stream()
+                    async for chunk in stream:
                         if chunk["type"] == "audio":
                             chunks += chunk["data"]
-                    return bytes(chunks)
+                    body = bytes(chunks)
+                    if body and len(self._mp3_cache) < EDGE_CACHE_MAX_ENTRIES:
+                        self._mp3_cache[text] = body
+                    return body
             except TimeoutError as error:
                 # Deliberately NOT retried. A timeout means the endpoint is
                 # stalling rather than refusing, and the second attempt stalls
                 # the same way: measured 10s + 10s = 21s on one clause, during
                 # which the whole turn's remaining audio sat behind it.
+                if chunks:
+                    logger.warning(
+                        "edge TTS timed out after %.1fs for %r - keeping the %d bytes that arrived",
+                        timeout, text[:40], len(chunks),
+                    )
+                    return bytes(chunks)
                 logger.warning("edge TTS timed out after %.1fs for %r", timeout, text[:40])
                 raise RuntimeError(f"edge TTS timed out after {timeout:.1f}s") from error
             except Exception as error:  # aiohttp raises a family of these

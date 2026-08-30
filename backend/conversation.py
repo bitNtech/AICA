@@ -1,5 +1,12 @@
 """Conversation Manager: routes a caller transcript through the assembled
-prompt, the LLM, and the mock tool layer, producing the agent's turn.
+prompt and the LLM, producing the agent's turn.
+
+There is deliberately NO tool layer. The agent converses: it remembers what
+the caller told it (the transcript is the memory) and answers from the prompt.
+Measured on this box, sending the 22 tool schemas cost 1778 of 5290 prompt
+tokens and dropped generation from 12.5 to 10.2 tok/s - about a fifth of the
+time-to-first-word budget on a voice channel - while register_eval scored the
+same scenarios 12/14 mechanically clean without them against 10/14 with them.
 
 Per BACKEND_COMPLETION.md Sec3.1: the prompt is assembled per turn by
 prompt_builder.py (condensed core + one flow playbook + that flow's exemplars),
@@ -9,15 +16,9 @@ exists yet.
 
 stream_utterance() is the interface the live transports use: it yields each
 clause as soon as it closes, so TTS can start speaking while the model is still
-generating, then a final AgentTurn carrying the full text, any call-control
-action (hangUp/transferCall) and the grounding verdict for the turn.
-handle_utterance() is the same thing collapsed to a string, for the eval
-scripts and tests that have no use for partial output.
-
-The ledger is rendered INTO the prompt, not merely carried alongside it, and is
-refreshed inside the tool loop - see _system_prompt_for(). Rendering it from
-the call's opening metadata instead left the prompt's KNOWN FACTS block blank
-all call, which told the model to go re-discover facts the server already held.
+generating, then a final AgentTurn carrying the full text and the grounding
+verdict for the turn. handle_utterance() is the same thing collapsed to a
+string, for the eval scripts and tests that have no use for partial output.
 """
 
 from __future__ import annotations
@@ -29,16 +30,10 @@ import logging
 import re
 
 from .clause_chunker import ClauseChunker
-from .grounding import (
-    AMBULANCE_CLAIM as _AMBULANCE_CLAIM,
-    grounding_sources,
-    unbacked_action_claims,
-    ungrounded_identifiers,
-)
+from .grounding import grounding_sources, unbacked_action_claims, ungrounded_identifiers
 from .llm import LlmClient, LlmReply, ReplyComplete
 from .prompt_builder import PromptBuilder, detect_intent
 from .settings import ConversationSettings
-from .tools import TOOL_SCHEMAS, MockHospitalDb, execute_tool
 
 logger = logging.getLogger("aica.conversation")
 
@@ -106,22 +101,6 @@ def render_template(template: str, metadata: dict[str, str]) -> str:
 
 
 @dataclass(frozen=True)
-class CallControl:
-    """A tool call that ends or moves the call, not just records something.
-
-    hangUp and transferCall are the two tools whose whole purpose is to change
-    what the TRANSPORT does. Executing them against MockHospitalDb and moving
-    on left the agent saying its goodbye and then sitting on an open socket
-    forever, waiting for a caller who had been told the call was over. The
-    transports (main.py, telephony.py) act on this; the mock DB result stays
-    exactly as it was, so the model still sees a normal tool result.
-    """
-
-    action: str  # "hang_up" | "transfer"
-    detail: str = ""
-
-
-@dataclass(frozen=True)
 class AgentClause:
     """One speakable clause of the agent's reply, released as soon as it closes."""
 
@@ -129,27 +108,10 @@ class AgentClause:
 
 
 @dataclass(frozen=True)
-class ToolInvoked:
-    """One executed tool call, surfaced so a transport can show/persist it.
-
-    The tool layer is where an agent turn is most opaque and most worth
-    watching: "which tool fired, with what arguments, and what came back" is
-    the difference between a reply that is grounded and one that is invented.
-    Yielding it makes that visible in the console and durable in the call-event
-    store, instead of only in server logs.
-    """
-
-    name: str
-    arguments: dict
-    result: dict
-
-
-@dataclass(frozen=True)
 class AgentTurn:
     """The completed turn: everything said, plus any call-control action."""
 
     text: str
-    call_control: CallControl | None = None
     # IDs/phone numbers the agent stated that no tool, no caller turn and no
     # standing fact accounts for - see backend/grounding.py. Empty is the
     # expected case; anything here is a fabrication the caller was just told.
@@ -161,32 +123,12 @@ class AgentTurn:
     unbacked_claims: tuple[str, ...] = ()
 
 
-# Tool name -> the call-control action executing it implies.
-_CALL_CONTROL_TOOLS: dict[str, str] = {"hangUp": "hang_up", "transferCall": "transfer"}
-
-# Said only when the model calls a tool having spoken nothing at all this turn.
-# Word for word what runtime_core.txt's TOOLS section already asks for before a
-# lookup, so this is the prompt's own line rather than a new invention - and it
-# is honest, because the tool call it promises is the very next thing that runs.
-HOLDING_LINE = "ஒரு நிமிஷம் சார், system-ல check பண்றேன்..."
-
-# Tools that must never be preceded by HOLDING_LINE. An ambulance dispatch is
-# the one flow where the prompt demands speed and a said-out-loud confirmation
-# instead ("say it is moving"), and announcing a system check before hanging up
-# or transferring contradicts the goodbye the model just gave.
-_NO_HOLDING_LINE = frozenset({"dispatchAmbulance", *_CALL_CONTROL_TOOLS})
-
-
 @dataclass
 class CallSession:
     connection_id: str
     metadata: dict[str, str]
     ledger: dict[str, object] = field(default_factory=dict)
     messages: list[dict] = field(default_factory=list)
-    # Set when the model calls hangUp/transferCall; read by the transport once
-    # the turn's remaining speech has actually been sent, so the agent's
-    # closing line is not cut off by its own hang-up.
-    call_control: CallControl | None = None
     # Sticky across turns: a caller states their reason once, then answers
     # follow-up questions ("ஆமாம்", a phone number) that match no trigger at
     # all. Re-detecting per turn would drop the playbook mid-flow, so a new
@@ -250,7 +192,6 @@ class ConversationManager:
         self.prompts = PromptBuilder(
             settings.runtime_core_path, settings.prompt_path, settings.exemplars_path
         )
-        self.db = MockHospitalDb()
         self._sessions: dict[str, CallSession] = {}
 
     @property
@@ -315,7 +256,7 @@ class ConversationManager:
             messages = _with_language_reminder(
                 session.messages, self._turn_facts_message(session)
             )
-            async for event in llm.stream(messages, TOOL_SCHEMAS, max_tokens=1):
+            async for event in llm.stream(messages, max_tokens=1):
                 if isinstance(event, ReplyComplete):
                     break
         except asyncio.CancelledError:
@@ -364,20 +305,38 @@ class ConversationManager:
 
         Rendered fresh every turn and appended near the end of the message
         list. See _system_prompt_for for why it is not in the system prompt.
+
+        Only facts that are actually KNOWN are rendered. The block used to list
+        all five labels every turn with blanks after them and a paragraph
+        explaining what a blank meant - about 70 tokens of empty scaffolding on
+        every single turn of every call, since a browser call opens knowing
+        nothing but the agent's own name. Worse, it put "mrn:" in front of a
+        model the reminder immediately tells never to say an MRN.
+
+        What the caller has said is not lost by dropping it: the transcript is
+        in the message list directly above, which is where a conversational
+        agent's memory actually lives. This block is only for facts the SERVER
+        knows independently - a telephony leg's caller ID, say.
         """
         facts = session.known_facts()
         lines = [
-            "## KNOWN FACTS — already verified, never ask for these again",
-            f"caller_name: {facts.get('caller_name', '')}",
-            f"caller_mobile: {facts.get('caller_mobile', '')}",
-            f"mrn: {facts.get('mrn', '')}",
-            f"patient_name: {facts.get('patient_name', '')}",
-            f"last_visit: {facts.get('last_visit', '')}",
-            "A blank value means it is not yet known — discover it normally. "
-            "Never say a label or a blank aloud.",
+            f"{label}: {facts[key]}"
+            for key, label in (
+                ("caller_name", "caller_name"),
+                ("caller_mobile", "caller_mobile"),
+                ("mrn", "mrn"),
+                ("patient_name", "patient_name"),
+                ("last_visit", "last_visit"),
+            )
+            if facts.get(key)
         ]
-        prompt = "\n".join(lines)
         established = _format_established_facts(session)
+        if not lines and not established:
+            return ""
+
+        prompt = "\n".join(
+            ["## KNOWN FACTS — already verified, never ask for these again", *lines]
+        )
         if established:
             prompt = f"{prompt}\n{established}\n"
         return prompt
@@ -437,71 +396,6 @@ class ConversationManager:
             )
         return tuple(claims)
 
-    def _dispatch_ambulance_fallback(
-        self, session: CallSession, connection_id: str, caller_text: str
-    ) -> ToolInvoked | None:
-        """Actually send the ambulance the agent just told the caller was sent.
-
-        LLM_TEST_RESULTS.txt PART 7.3: given a chest-pain call and an address,
-        the model says "Ambulance அனுப்பிட்டேன், இப்பவே கிளம்பிடுச்சு" (I have
-        sent an ambulance, it has left right now) and calls dispatchAmbulance
-        approximately never. Three separate prompt fixes failed to move it -
-        runtime_core.txt's EMERGENCY section, its GROUNDING section, and
-        _LANGUAGE_REMINDER (the last one also caused degenerate repetition and
-        was reverted) - so this stops being a thing the prompt is trusted to
-        get right. Left alone, this is worse than a wrong ID: there is no
-        invented identifier for backend/grounding.py's other check to catch,
-        and the caller stops looking for help because they were just told help
-        is coming.
-
-        Scoped deliberately to this one claim, not a general "auto-call
-        whatever the model claims" mechanism: dispatchAmbulance takes exactly
-        one required argument, and every observed failure (and the exemplar
-        that demonstrates the correct shape) has the caller state the address
-        in the SAME turn the agent claims the dispatch - it is `caller_text`,
-        the utterance this call of stream_utterance is already handling. Other
-        claims (a booking made, a ticket raised) need arguments - a
-        department, a specific slot among several offered - that are not
-        similarly unambiguous, so auto-completing THOSE is left as the
-        product decision the handoff calls it, not silently done here.
-
-        Runs against MockHospitalDb, same as a model-issued call would; this
-        only supplies the call the model failed to make, not a new capability.
-        """
-        address = caller_text.strip()
-        if not address:
-            return None
-        arguments = {"address": address}
-        result = execute_tool(self.db, "dispatchAmbulance", arguments)
-        session.ledger.update(result)
-        call_id = f"auto-dispatch-{len(session.messages)}"
-        session.messages.append(
-            {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": "dispatchAmbulance",
-                            "arguments": json.dumps(arguments, ensure_ascii=False),
-                        },
-                    }
-                ],
-            }
-        )
-        session.messages.append(
-            {"role": "tool", "tool_call_id": call_id, "content": json.dumps(result, ensure_ascii=False)}
-        )
-        logger.warning(
-            "AUTO-DISPATCH: %s server dispatched an ambulance to %r - the agent "
-            "had already told the caller this was done, with no tool call behind it",
-            connection_id,
-            address,
-        )
-        return ToolInvoked(name="dispatchAmbulance", arguments=arguments, result=dict(result))
-
     def record_interrupted_turn(self, connection_id: str, spoken: str) -> None:
         """Append what the agent actually got out before the caller cut in.
 
@@ -525,15 +419,15 @@ class ConversationManager:
     async def stream_utterance(self, connection_id: str, llm: LlmClient, text: str):
         """Run one caller turn, yielding each clause as soon as it closes.
 
-        Yields zero or more AgentClause, then exactly one AgentTurn carrying
-        the full text and any call-control action.
+        Yields zero or more AgentClause, then exactly one AgentTurn.
 
-        Clauses are released optimistically, before it is known whether this
-        LLM response will also carry a tool call. That is deliberate and
-        matches how the golden flows actually sound: the agent says "ஒரு
-        நிமிஷம் சார், system-ல check பண்றேன்..." and THEN does the lookup, so
-        speech preceding a tool call is the wanted behaviour, not a mistake to
-        guard against. It is also what hides tool latency from the caller.
+        There is no tool loop. This agent talks: it remembers what the caller
+        told it (the transcript IS the memory) and answers from the prompt.
+        Measured on this box, sending the 22 tool schemas cost 1778 of the
+        5290 prompt tokens AND dropped generation from 12.5 to 10.2 tok/s,
+        which is ~20% of the time-to-first-word budget on a voice channel -
+        and register_eval scored the same scenarios 12/14 clean without them
+        against 10/14 with them. Removing them is faster AND better spoken.
         """
         session = self._sessions.get(connection_id)
         if session is None:
@@ -547,118 +441,110 @@ class ConversationManager:
 
         session.messages.append({"role": "user", "content": text})
 
+        chunker = ClauseChunker()
         spoken: list[str] = []
-        for _ in range(self.settings.max_tool_iterations):
-            chunker = ClauseChunker()
-            reply: LlmReply | None = None
+        asked_question = False
 
-            # Rebuilt every iteration on purpose: the iteration right after a
-            # lookupPatient is the first consumer of what it returned.
-            facts = self._turn_facts_message(session)
-            async for event in llm.stream(
-                _with_language_reminder(session.messages, facts), TOOL_SCHEMAS
-            ):
-                if isinstance(event, ReplyComplete):
-                    reply = event.reply
-                    break
-                for clause in chunker.feed(event.text):
-                    spoken.append(clause)
-                    yield AgentClause(clause)
+        def speakable(clause: str) -> bool:
+            """Whether this clause may be spoken, given what already has been.
 
-            if reply is None:
-                raise RuntimeError("LLM stream ended without a ReplyComplete event")
+            Enforces the one turn-discipline rule the model still breaks: ONE
+            question per turn. Prose has failed three times (LLM_STACK.md Sec9)
+            - runtime_core.txt states the rule three ways in one line and the
+            model asks two anyway.
 
-            # The chunker never closes a clause on buffer-end (see
-            # clause_chunker.py), so the reply's last clause only exists once
-            # the stream is done and we ask for it.
-            remainder = chunker.flush()
-            if remainder:
-                spoken.append(remainder)
-                yield AgentClause(remainder)
+            This is not a truncation of the reply. Measured against the real
+            recorded calls in call_events.db, a two-question turn arrives as
+            two SEPARATE clauses:
 
-            if not reply.tool_calls:
-                # History keeps this response's own content, so the transcript
-                # sent to the model stays faithful to what it produced. The
-                # TURN, though, is everything the caller heard this turn -
-                # including any preamble spoken before a tool call in an
-                # earlier iteration. Grounding has to see all of it: an
-                # invented ID is just as invented when it lands in "ஒரு
-                # நிமிஷம் சார், MRN ... check பண்றேன்" before the lookup as
-                # when it lands in the answer after it.
-                session.messages.append({"role": "assistant", "content": reply.content})
-                spoken_text = " ".join(spoken)
-                unbacked_claims = self._check_action_claims(session, spoken_text)
-                if _AMBULANCE_CLAIM in unbacked_claims:
-                    invoked = self._dispatch_ambulance_fallback(session, connection_id, text)
-                    if invoked is not None:
-                        yield invoked
-                        unbacked_claims = self._check_action_claims(session, spoken_text)
-                yield AgentTurn(
-                    text=spoken_text,
-                    call_control=session.call_control,
-                    ungrounded=self._check_grounding(session, spoken_text),
-                    unbacked_claims=unbacked_claims,
+                | நீங்க ... இருப்பீங்களா சார்?
+                | எங்கே ... போகிறீர்கள்?
+
+            so the second is still unspoken when it closes and can simply be
+            withheld. Later NON-question clauses are kept - the closing line
+            ("desk-ல இருந்து call பண்ணுவாங்க") often follows the question,
+            and dropping the tail wholesale would lose it.
+
+            '?' is the same test backend/scripts/register_eval.py scores turns
+            with, deliberately: one definition, so the guard and the eval
+            cannot disagree about what a question is.
+            """
+            nonlocal asked_question
+            if "?" not in clause:
+                return True
+            if asked_question:
+                logger.info(
+                    "turn discipline: withheld a second question from %s: %s",
+                    connection_id,
+                    clause,
                 )
-                return
+                return False
+            asked_question = True
+            return True
 
-            if not spoken and not any(call.name in _NO_HOLDING_LINE for call in reply.tool_calls):
-                # Dead air. Measured: a lookupPatient turn where the model
-                # produced no text at all, so the caller heard silence for the
-                # whole tool round-trip AND for the generation that followed
-                # it - the two slowest things in a turn, back to back, with
-                # nothing over them. Deliberately not appended to
-                # session.messages: history stays faithful to what the model
-                # itself produced (see the comment above), while `spoken` is
-                # what the caller actually heard, which is what grounding and
-                # the call log need.
-                spoken.append(HOLDING_LINE)
-                yield AgentClause(HOLDING_LINE)
+        reply: LlmReply | None = None
+        async for event in llm.stream(
+            _with_language_reminder(session.messages, self._turn_facts_message(session))
+        ):
+            if isinstance(event, ReplyComplete):
+                reply = event.reply
+                break
+            for clause in chunker.feed(event.text):
+                if not speakable(clause):
+                    continue
+                spoken.append(clause)
+                yield AgentClause(clause)
 
-            session.messages.append(_assistant_tool_call_message(reply))
-            for call in reply.tool_calls:
-                result = execute_tool(self.db, call.name, call.arguments)
-                session.ledger.update(result)
-                action = _CALL_CONTROL_TOOLS.get(call.name)
-                if action is not None:
-                    detail = str(call.arguments.get("desk") or call.arguments.get("reason") or "")
-                    session.call_control = CallControl(action=action, detail=detail)
-                    logger.info("call control requested for %s: %s %s", connection_id, action, detail)
-                session.messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": json.dumps(result, ensure_ascii=False),
-                    }
-                )
-                yield ToolInvoked(name=call.name, arguments=dict(call.arguments), result=dict(result))
+        if reply is None:
+            raise RuntimeError("LLM stream ended without a ReplyComplete event")
 
-            # The facts the loop just learned reach the next iteration through
-            # _turn_facts_message(), which is rebuilt at the top of every
-            # iteration - so the iteration that follows a lookupPatient still
-            # sees the MRN and patient name it returned, which is the whole
-            # point of refreshing inside the loop rather than once per turn.
-            #
-            # messages[0] is deliberately NOT rewritten here any more. It is
-            # static for the flow, and rewriting it with a changed ledger is
-            # what threw away the prefix cache and cost ~29s of prompt
-            # re-evaluation on exactly the turns that had done a tool call.
+        # The chunker never closes a clause on buffer-end (see
+        # clause_chunker.py), so the reply's last clause only exists once the
+        # stream is done and we ask for it.
+        remainder = chunker.flush()
+        if remainder and speakable(remainder):
+            spoken.append(remainder)
+            yield AgentClause(remainder)
 
-            # hangUp is terminal: the prompt's CLOSING section says "do not
-            # speak after the tool call", so there is nothing left for another
-            # iteration to produce and looping again would only invite the
-            # model to talk past its own goodbye.
-            if session.call_control is not None and session.call_control.action == "hang_up":
-                full_text = " ".join(spoken)
-                yield AgentTurn(
-                    text=full_text,
-                    call_control=session.call_control,
-                    ungrounded=self._check_grounding(session, full_text),
-                    unbacked_claims=self._check_action_claims(session, full_text),
-                )
-                return
+        spoken_text = " ".join(spoken)
+        # What was SPOKEN, not what was generated - the two differ whenever a
+        # second question was withheld above. Same reasoning as
+        # record_interrupted_turn: the model must believe it said exactly what
+        # the caller heard, or it will treat a question nobody was asked as
+        # already asked and never come back to it.
+        session.messages.append({"role": "assistant", "content": spoken_text})
+        _trim_history(session)
+        yield AgentTurn(
+            text=spoken_text,
+            ungrounded=self._check_grounding(session, spoken_text),
+            unbacked_claims=self._check_action_claims(session, spoken_text),
+        )
 
-        logger.error("tool-call loop did not terminate within %d iterations for %s", self.settings.max_tool_iterations, connection_id)
-        raise RuntimeError("LLM tool-call loop did not terminate")
+
+# The assembled system prompt is ~3.5k tokens against the Modelfile's
+# num_ctx 8192, so a call has roughly 4.6k tokens of room for its history.
+# Nothing used to bound that. A long enough call overflows the window, and
+# Ollama truncates from the FRONT - taking the system prompt's language rules
+# with it. That is not a hypothetical failure: it is the exact bug that
+# backend/prompt_builder.py exists to fix (the agent switches to English and
+# starts inventing identifiers), and it is silent.
+#
+# 40 messages is ~20 exchanges, far longer than any real hospital call and
+# still ~2.4k tokens inside the window. messages[0] is the system prompt and
+# is never dropped - it is the one message that must survive.
+#
+# ponytail: a flat cap, not summarisation. If calls ever genuinely run past 20
+# exchanges, summarise the dropped span into the facts block instead.
+MAX_HISTORY_MESSAGES = 40
+
+
+def _trim_history(session: CallSession) -> None:
+    """Drop the oldest exchanges, never the system prompt."""
+    overflow = len(session.messages) - 1 - MAX_HISTORY_MESSAGES
+    if overflow <= 0:
+        return
+    logger.info("call %s: trimming %d oldest messages", session.connection_id, overflow)
+    del session.messages[1 : 1 + overflow]
 
 
 # Recency beats distance: a small model reliably drifts into pure English by
@@ -666,29 +552,66 @@ class ConversationManager:
 # because those sit thousands of tokens back while the recent turns are the
 # strongest signal. This rides immediately before generation, costs ~40 tokens,
 # and is not stored in history - so it never accumulates across a long call.
+#
+# It used to have to open by naming "call a tool", because a speech-only
+# instruction here read to the model as "produce speech now" and suppressed
+# tool calling entirely. There are no tools any more, so that constraint is
+# gone and the whole message is speaking rules - ordered by how often each is
+# actually broken, measured with backend/scripts/register_eval.py on unseen
+# scenarios, most-violated first rather than most important-sounding first.
 _LANGUAGE_REMINDER = (
-    # It MUST open with the tool clause. This message sits after the caller's
-    # turn, immediately before generation, and an earlier version of it talked
-    # only about how to speak - which read to the model as "produce speech now"
-    # and suppressed tool calling completely. Measured, not guessed: with that
-    # version the agent never called a single tool across a four-turn booking
-    # and invented an MRN; with the message removed entirely, lookupPatient
-    # fired on the first attempt and the agent read back the real record. So
-    # the reminder earns its place only if it names calling a tool as one of
-    # the two things the model may do next.
-    "[Next you may either call a tool or speak. If you need a fact you do not "
-    "already have from a tool result in THIS call - an MRN, an address, a "
-    "slot, a bill, a report - call the tool now; do not answer from memory. "
-    # The speaking rules below are ordered by how often each is actually
-    # broken, measured with backend/scripts/register_eval.py on unseen
-    # scenarios - most-violated first, not most important-sounding first.
-    "If you speak: ONE question per turn - never two - and put it last. "
-    "Under 40 words. Never repeat the caller's own sentence back at them. "
+    "[Reply now, out loud. ONE question per turn - never two - and put it "
+    "last. Under 40 words. Never repeat the caller's own sentence back at "
+    "them; acknowledge in two or three words and move on. "
     "Reply in spoken Chennai Tamil (Tamil script) code-mixed with English "
     "hospital words in Latin script - never pure English. "
     "If the caller speaks English, mirror them but keep சார்/மேடம். "
-    "Never invent an ID, number or name.]"
+    "Take the request down: ask for the next detail you still need. Never "
+    "refuse the request itself and never open with what you cannot do. "
+    "Never state an MRN, appointment ID, bill amount, slot time or report "
+    "result, and never claim you already booked, cancelled or checked "
+    "anything - the desk does that after the call.]"
 )
+
+
+# Counted in WORDS, not letters. Letters over-count English badly: Tamil packs
+# a syllable into one glyph where English spells it out, so
+# "Cardiology-ல ஒரு appointment book பண்ணணும்" - an ordinary code-mixed
+# TAMIL line - is 64% Latin by character and would wrongly flip the agent into
+# English. By word it is 2 English of 5, which is what it actually is.
+#
+# A word counts as Tamil if it contains ANY Tamil character, so "Cardiology-ல"
+# is Tamil: the case suffix is what makes the sentence Tamil. Bare digits are
+# ignored - a phone number is not evidence of either language.
+#
+# The bar is deliberately high. Tamil is the safe default (it is the register
+# every exemplar demonstrates), so switching needs most of the turn to be
+# English, not merely some of it.
+_WORD_RE = re.compile(r"[\w஀-௿]+")
+_TAMIL_LETTER_RE = re.compile(r"[஀-௿]")
+_ENGLISH_SHARE_TO_MIRROR = 0.7
+
+
+def caller_is_speaking_english(text: str) -> bool:
+    """Whether this caller turn is English rather than code-mixed Tamil.
+
+    NOT currently wired into the prompt, deliberately. Switching the register
+    on this was built and measured twice and made things WORSE both times:
+    prose alone ("reply mainly in English") only half-moved the register and
+    introduced parroting, and adding an English worked example alongside the
+    twenty Tamil ones produced ungrammatical output mixing both
+    ("எந்த நாள் உங்களுக்கு சொல்லுங்க?"). Answering a
+    English-speaking caller in coherent Tamil beats answering them in broken
+    half-English, so the agent stays in Tamil.
+
+    Kept because the measurement is the correct one and any future attempt
+    needs it: count WORDS, not letters (see the comment above).
+    """
+    words = [w for w in _WORD_RE.findall(text) if not w.isdigit()]
+    if not words:
+        return False
+    english = sum(1 for w in words if not _TAMIL_LETTER_RE.search(w))
+    return english / len(words) >= _ENGLISH_SHARE_TO_MIRROR
 
 
 def _with_language_reminder(messages: list[dict], facts: str = "") -> list[dict]:
@@ -706,18 +629,3 @@ def _with_language_reminder(messages: list[dict], facts: str = "") -> list[dict]
         tail.append({"role": "system", "content": facts})
     tail.append({"role": "system", "content": _LANGUAGE_REMINDER})
     return [*messages, *tail]
-
-
-def _assistant_tool_call_message(reply: LlmReply) -> dict:
-    return {
-        "role": "assistant",
-        "content": reply.content or None,
-        "tool_calls": [
-            {
-                "id": call.id,
-                "type": "function",
-                "function": {"name": call.name, "arguments": json.dumps(call.arguments, ensure_ascii=False)},
-            }
-            for call in reply.tool_calls
-        ],
-    }

@@ -1,367 +1,383 @@
-# AICA-aruvi — handoff for the next session
+# AICA-aruvi — handoff
 
-Branch `backend`. All work is **UNCOMMITTED**. `pytest -q` is green at
-**190 passed** in ~5s (was 185; +5 this session, 0 broken).
+Branch `backend`. `pytest -q` is green at **194 passed** in ~6s. Start with `./run.sh`.
+
+The LLM half of the system has its own document: **[LLM_STACK.md](LLM_STACK.md)** —
+model, prompt architecture, every measured number, and the approaches that were
+built and rejected. Read that before touching the prompt. This file is the
+short operational handoff.
 
 ---
 
-## 0. HOW TO WORK ON THIS REPO (read first)
+## 0. HOW TO WORK ON THIS REPO
 
-This project has burned entire sessions on confident wrong fixes. The rules
-below are not style preferences, each one is a scar.
+Each of these is a scar, not a style preference.
 
 1. **Measure before you change anything.** Every claim in this file has a
-   number behind it. If you are about to "fix" something you have not
-   measured, you are guessing. **This session deleted three numbers the last
-   handoff stated confidently** (§2) — including the one it nominated as the
-   top priority. Check inherited numbers before building on them.
-2. **`LLM_TEST_RESULTS.txt` is the lab notebook.** PART 7 = tool-calling and
-   safety. PART 8 = the TTS latency work. Read the part relevant to your task
-   IN FULL before touching code. It records what was tried AND what failed,
-   which is the expensive half.
-3. **Exemplars are the specification, prose is commentary.** A rule written
+   number behind it. A previous handoff stated three numbers confidently and
+   all three were false, including the one it named as top priority.
+2. **Exemplars are the specification, prose is commentary.** A rule written
    directly at a behaviour has made things worse every time it has been tried
    on this 4B model. A rule DEMONSTRATED in `golden/flow_exemplars.json` has
-   held every time. (PART 7.2) — and see §5, where a rule stated three times
-   in emphatic prose is still the single biggest quality failure.
-4. **Run evals at `LLM_TEMPERATURE=0`.** At the 0.3 default the same prompt
-   scored 9/14, 13/14, 9/14 in one session — noise wider than any change being
-   measured. 0.3 stays the product default; 0 is the measurement setting.
-5. **A test that cannot fail is worth nothing.** Both guards added this session
-   were verified by reintroducing the bug and confirming the test caught it.
-   Do this for any non-trivial guard you add.
-6. **Don't ship what you cannot verify.** This session built per-flow tool
-   selection, measured that its derivation was wrong, and reverted it (§6)
-   rather than ship a plausible-looking regression into the one area with no
-   trustworthy eval.
-7. Don't re-derive the machine setup in §7. It is settled.
+   held every time. See LLM_STACK.md §6 — including the case where an exemplar
+   taught the wrong thing *by omission*.
+3. **Run evals at `LLM_TEMPERATURE=0`.** At the 0.3 product default the same
+   prompt scored 9/14, 13/14 and 9/14 in one sitting — noise wider than any
+   change worth measuring.
+4. **A test that cannot fail is worth nothing.** Every guard in this repo was
+   verified by reintroducing its bug and confirming the test caught it. Two
+   guards written this session initially passed with the code deleted; both
+   were rewritten to drive the real call path. Do this for anything you add.
+5. **Don't ship what measures worse.** English mirroring was built twice and
+   reverted twice (LLM_STACK.md §9). That is the correct outcome, not a
+   failure.
+6. **Redirect stdout AND stderr to a file when you start the server.** Several
+   real bugs were found only in that log, and a hidden window has none.
 
 ---
 
-## 1. WHAT THE GOAL IS
+## 1. WHAT THIS IS
 
-A real-time Tamil/English hospital phone agent that actually **books, cancels,
-dispatches and completes what it tells the caller it did**, at usable latency.
-Not a demo that talks convincingly and does nothing.
+A real-time Tamil/English hospital phone agent. A caller speaks; the agent
+listens, understands, takes the request down, and hands off to the desk.
 
-**The user's current priority:** an MVP where the *prominently visible* things
-are realistic and perfected — speech, transcript and response in real time,
-"quality response in minimal time with zero flaws". Tool-calling correctness
-was explicitly deprioritised; do not restart that work unless asked. §6
-preserves its state.
+**It talks, it does not transact.** There is deliberately no tool layer — see
+LLM_STACK.md §5 for the measurement behind that. It cannot book, cancel,
+dispatch or look anything up, and it says so honestly at the end of a call
+rather than at the start.
 
 ---
 
-## 2. THREE INHERITED NUMBERS THAT WERE WRONG — check before reusing
+## 2. RUNNING IT
 
-The previous handoff stated these confidently. All three were measured this
-session and are false. They are recorded here so nobody re-derives them.
+```bash
+.venv/Scripts/python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 \
+  > logs/server.log 2>&1
+```
 
-| Claim | Measured reality |
+Then `http://localhost:8000/console`. `GET /api/health` reports which of the
+four components actually came up — a server that answers requests is not
+evidence that ASR, the LLM or TTS is usable.
+
+**The server caches prompts and code at startup.** Restart it after editing
+`golden/runtime_core.txt`, `golden/flow_exemplars.json`, or any `backend/*.py`.
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+  Where-Object { $_.CommandLine -like '*uvicorn*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+---
+
+## 3. THE MACHINE — measured, do not re-derive
+
+RTX 2050, **4096 MiB VRAM**. This is the binding constraint on everything.
+
+| | |
 |---|---|
-| "The greeting takes ~11s before the caller can speak" — listed as priority item C | **False. 0.98s.** The greeting leaves the server complete in ~1s. It is **7.85s of speech**. The 11.31s in the old probe was playback time, not latency. `turn_probe.py` starts its clock at `call_started` and stops at `agent_speaking_end`, which fires when the audio is *sent*. There is no bug here. |
-| "prefix mutated by one word = 28,895ms" — the basis for priority item A | **Stale by orders of magnitude.** Measured now: 3546-token prompt evaluates cold in **1.32s** (2683 tok/s); an identical prefix re-evaluates in **0.08s**. Prompt evaluation is no longer a significant cost. |
-| "16.6 → 24–27 tok/s after the Ollama env tuning" | **13.3 tok/s** at the shipped `num_ctx 8192`, with the model at 33% CPU / 67% GPU. Generation, not prompt evaluation, is now the dominant LLM cost. |
+| Ollama, `aruvi-base` | 3.6 GB resident, **33% CPU / 67% GPU** |
+| VRAM free with it loaded | **439 MiB** |
+| `torch` | `2.13.0+cpu` — a CPU-only wheel, no CUDA kernels |
+| IndicConformer checkpoint | 499 MB |
 
-**Priority item A from the old handoff ("move the flow PLAYBOOK out of the
-cached prefix") is dead — do not do it.** The reasoning it rested on does not
-survive contact with how the prefix cache actually works here. The shared
-prefix between what `prewarm()` evaluates and what turn 1 sends is the core
-prompt *either way*, because the playbook and the exemplars **both** change
-when the flow is detected. Reordering them changes which 1k tokens get
-re-evaluated, not how many. Verified by dumping both prompts and diffing:
-82% shared prefix before the change, and reordering cannot raise that.
+**The LLM cannot be moved fully onto the GPU, and the ASR cannot be moved onto
+it at all.** Both were measured, not assumed:
 
----
+- Shrinking `num_ctx` 8192 → 6144 moved the split only 33/67 → **31/69**. It is
+  the *weights* that do not fit, not the KV cache, so no context setting fixes
+  this.
+- **Never add `PARAMETER num_gpu 99`.** Twice as fast on a 13-token prompt and
+  **114 seconds** on the real one: on a 4 GB card the weights fit but weights
+  plus KV cache do not, and Windows WDDM does not fail that allocation — it
+  silently spills to system RAM over PCIe. Benchmark only against real
+  `PromptBuilder` output; a short prompt will lie to you.
+- The ASR runs on CPU because the installed torch has no CUDA support, and
+  there are 439 MiB free against a 499 MB model. A CUDA torch build alone would
+  not be enough.
 
-## 3. DONE THIS SESSION — four fixes, all measured
+Real fixes, in order of effect: a card with more VRAM, or a smaller
+quantisation (costs quality — measure `register_eval` before and after).
 
-### A. `localhost` cost 2.05 seconds on every single LLM call ⭐
+### Ollama environment — persisted user env vars, for the SERVER process
 
-The largest win available, and it was a hostname.
+| Var | Value | Why |
+|---|---|---|
+| `OLLAMA_FLASH_ATTENTION` | `1` | part of what buys the 67% GPU share |
+| `OLLAMA_KV_CACHE_TYPE` | `q8_0` | same |
+| `OLLAMA_KEEP_ALIVE` | `-1` | **the model used to unload after 5 min idle**, and the next call paid a full 3.6 GB reload — measured as a 14.9s first clause against a normal 1.3–2.6s |
 
-```
-POST /api/chat via http://localhost:11434   wall 2.10s   (ollama's own total_duration: 0.06s)
-POST /api/chat via http://127.0.0.1:11434   wall 0.05s   (ollama's own total_duration: 0.05s)
-```
+**The Ollama tray app must be restarted after changing any of these** or it
+keeps the old environment. Verify with `ollama ps`.
 
-Name resolution tries an address the server is not listening on and waits out
-a timeout first. Ollama never sees it, so it is invisible in every server-side
-metric — it only shows up as wall-clock minus `total_duration`, which is how it
-was found. A turn with a tool call makes 2–3 LLM requests and paid it each time.
+### Never write `localhost` in this repo
 
-Fixed in `.env`, `.env.example`, `backend/settings.py` (the default),
-`backend/scripts/setup_model.py`, `finetune/README.md`. **Never write
-`localhost` in this repo.** The comment at `settings.py:100` says why.
-
-### B. Barge-in fired on a single 16 ms VAD frame
-
-Reported symptom: "the agent is getting interrupted by even small voice from
-the microphone". `queue_segment()` called `active_speech.interrupt()` on
-`speech_started`, i.e. the **first** hop over the 0.35 threshold — so a cough, a
-keystroke or a breath cancelled the agent mid-sentence.
-
-Fix is in `ActiveSpeech.note_speech()` (`backend/barge_in.py`): interrupt only
-after `VAD_BARGE_IN_FRAMES` **consecutive** speech frames, default 15 (240 ms).
-A spoken word is far longer than the gate; noise blips are one or two hops.
-Both call sites were fixed — `main.py` and `telephony.py` had the identical bug.
-
-Capture and ASR are untouched: the utterance is still recorded from its first
-frame. Only the *interrupt* is gated.
-
-Guarded by `test_a_noise_blip_does_not_interrupt_but_a_spoken_word_does`,
-verified to fail with the gate removed.
-
-### C. TTS had no timeout — one clause could hang the whole turn
-
-Found in the server log, not by looking for it: `21.27s synth` on an 8-character
-clause. Edge was timing out (~10s), being retried, and timing out again. Because
-the sender is ordered, that one clause held **every later clause's audio** behind
-it.
-
-Fix in `EdgeTts._stream_mp3`: `asyncio.timeout(TTS_TIMEOUT_SECONDS)`, default
-5s, and **a timeout is not retried** — a stalling endpoint stalls the same way
-twice. The text has already been sent, so giving up costs the voice for one
-clause and keeps the conversation moving. Guarded by
-`test_a_stalled_endpoint_gives_up_instead_of_hanging_the_turn`.
-
-### D. A silent tool call left the caller in total silence
-
-Measured on the live model: turn 3 of a booking call returned a `lookupPatient`
-call with **no spoken text at all**, so the caller heard nothing for the tool
-round-trip *and* nothing for the generation that followed — the two slowest
-things in a turn, back to back, with no audio over either.
-
-`conversation.py` now speaks `HOLDING_LINE` before running the tools when the
-model has said nothing this turn. The wording is lifted verbatim from
-`runtime_core.txt`'s own TOOLS section ("ஒரு நிமிஷம் சார், system-ல check
-பண்றேன்..."), so it is the prompt's line rather than a new invention, and it is
-honest — the tool call it promises runs immediately after.
-
-Deliberately **not** appended to `session.messages`: history stays faithful to
-what the model produced, while `spoken` is what the caller heard, which is what
-grounding and the call log need. That distinction already existed in the code;
-this follows it. Suppressed for `dispatchAmbulance`, `hangUp` and
-`transferCall` (`_NO_HOLDING_LINE`) — an emergency demands speed and a
-said-out-loud confirmation, not "one moment, I'll check the system".
-
-Three tests cover it, including the two suppression cases.
+Measured: the identical `/api/chat` request takes **2.10s** via `localhost` and
+**0.05s** via `127.0.0.1`. Name resolution tries an address the server is not
+listening on and waits out a timeout first. Ollama never sees it, so it is
+invisible in every server-side metric.
 
 ---
 
-## 4. WHERE THE LATENCY IS NOW — measured end to end
+## 4. WHERE THE LATENCY IS — measured end to end over the real socket
 
-Measured on the exact production path (`ConversationManager` + real
-`LlmClient` + real `TOOL_SCHEMAS` + real `ClauseChunker`, no websocket, no TTS):
-
-| | first token | first clause | full reply |
-|---|---|---|---|
-| turn 1 (after prewarm) | 3.28s | 4.80s | 7.37s |
-| turn 2 (warm prefix) | **0.59s** | **2.29s** | 8.57s |
-
-Add ~1s of Edge synthesis for first audio. Component costs:
-
-- **Prompt evaluation is solved.** 0.08s on a cache hit; 1.3s on turn 1, whose
-  prompt genuinely differs (the flow is now known). Do not spend more effort here.
-- **Generation is the bottleneck: 13.3 tok/s.** 33% of the model is on CPU
-  because the KV cache for `num_ctx 8192` does not fit alongside the weights in
-  4GB.
-- **First token → first clause is 1.5–1.7s**, i.e. the chunker accumulating
-  ~20 tokens at 13 tok/s. `FIRST_CHUNK_MAX_CHARS = 32` in `clause_chunker.py`
-  is the knob; lowering it trades naturalness for perceived latency. Untested.
-
-### num_ctx sweep — measured, and deliberately NOT shipped
-
-Real prompt, real KV cache, generation only:
-
-| num_ctx | gen |
+| | |
 |---|---|
-| 8192 (shipped) | 13.3 tok/s |
-| 6144 | 14.3 tok/s |
-| 5120 | 15.3 tok/s |
-| 4608 | 16.0 tok/s |
+| Greeting, fully delivered | **0.08s** (TTS cache) |
+| First clause of a reply | **1.3 – 2.6s** |
+| Whole turn spoken | 5 – 10s |
 
-20% for the whole range. **Rejected:** the assembled prompt is already 3546
-tokens *before* the 22 tool schemas (~1600 more), so 4608 leaves almost no room
-for a call's history, and overflowing it truncates the system prompt — the exact
-failure the Modelfile comment warns about. Revisit only after the prompt shrinks
-(§5). The Modelfile's claim of a "~1.5-2.5k token assembled prompt" is stale;
-it is 3546 without tools.
+The first clause is the number that matters — the caller hears speech while the
+model is still generating the rest.
 
----
-
-## 5. THE BIGGEST OPEN QUALITY LEVER — measured, not yet acted on
-
-`register_eval` at `LLM_TEMPERATURE=0`:
-
-```
-10/14 turns mechanically clean   — with all 22 tool schemas (shipped today)
-12/14 turns mechanically clean   — with tool schemas removed entirely
-```
-
-**~1600 tokens of tool JSON in front of a 4B model is measurably degrading its
-conversation.** (Same run, same scenarios, temperature 0, so this is not noise.)
-
-Every single failure in the shipped run is **the same rule**: two questions in
-one turn. `runtime_core.txt:29` states it three times in one line — "Ask exactly
-ONE question per turn, and the question is ALWAYS last. Never two questions in
-one turn." The model breaks it anyway. Per rule 3, more prose will not fix this;
-it needs either exemplars or a deterministic guard.
-
-Two candidate directions, neither started:
-
-1. **Shrink the prompt** so the model has less to hold. The tool schemas are
-   the obvious target but see §6 — the safe derivation does not exist yet. The
-   schemas themselves are already tight (one-line descriptions, bare string
-   params, 294 chars/tool); there is no fat to trim inside them.
-2. **A deterministic one-question guard.** Attractive because the rule is hard
-   and mechanical, but it is *not* a simple truncation: clauses are streamed to
-   TTS as they are produced, so by the time a second question is visible the
-   first has already been spoken; and cutting the LLM stream early would also
-   cut the tool call that arrives at the end of it. Anyone attempting this must
-   read `stream_utterance` first. Do not start it as a "quick fix".
-
-Also visible in the transcript and not yet quantified: when the caller speaks
-English throughout, the agent replied 100% Tamil (`runtime_core` Sec2 says shift
-to majority English). `register_eval` does not currently score this.
+Turn one of a freshly started server costs ~10s once while Ollama loads the
+model into VRAM. That is a cold-start cost, gone by the second call, and
+`OLLAMA_KEEP_ALIVE=-1` now stops it recurring mid-session.
 
 ---
 
-## 6. PER-FLOW TOOL SELECTION — built, measured, REVERTED
+## 5. THINGS THAT WILL BITE YOU
 
-Worth recording so the next person does not rebuild it.
-
-The idea: send only the tools the detected flow needs, cutting ~1200 tokens per
-request and recovering most of the §5 win. The elegant version derives the set
-from the playbook body itself — the playbook names the tools it drives, so
-there is no second list to drift.
-
-**It does not work.** Measured across all 20 flows, the playbooks name only the
-flow's *terminal action* tool. They do not name the shared ones:
-
-```
-appointment.book    -> searchSlots, bookAppointment        (no lookupPatient!)
-billing.query       -> createTicket                        (no getBill)
-referral.status     -> (nothing)                            (no getReferralStatus)
-emergency.escalate  -> (nothing)
-```
-
-`appointment.book` losing `lookupPatient` is a guaranteed functional break —
-the live model calls it in that flow, and the core prompt requires identifying
-the caller. Shipping this would have been a confident wrong fix in the one area
-with no trustworthy eval to catch it.
-
-**To do it properly** you need a hand-written intent→tools map (there is a
-partial precedent: `INTENT_EXPECTED_TOOL` in `backend/scripts/golden_eval.py`,
-manually verified against `tools.py`, but it only records the *terminal* tool),
-plus a drift test, plus a trustworthy `golden_eval` before and after. That is
-the gate. Do not ship it on a hunch.
-
----
-
-## 7. MACHINE — do NOT re-derive
-
-- RTX 2050, 4GB VRAM. Ollama has always used it; any "CPU only" note is stale.
-- `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` are persisted user
-  env vars for the Ollama **server** process. The tray app must be restarted
-  after `setx` to inherit them. Verify with `ollama ps` (~3.6GB, `33%/67%
-  CPU/GPU`).
-- **NEVER add `PARAMETER num_gpu 99`.** 2× faster on a 13-token prompt, **114
-  seconds** on the real 2.7k-token one. Benchmark only with real PromptBuilder
-  output.
-- Start the server:
-  `.venv/Scripts/python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000`
-  then check `GET /api/health` (all four true). Console at
-  `http://localhost:8000/console`.
-  **Redirect stdout/stderr to a file when you start it.** Three of this
-  session's four fixes were found in the server log, and a hidden window has
-  no log.
-- **The server caches prompts AND code at startup.** Restart it after editing
-  `golden/runtime_core.txt`, `golden/flow_exemplars.json`, or any
-  `backend/*.py`.
-  Kill with:
-  `Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -like '*uvicorn*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`
-- Full `pytest -q` ≈ 5s (190 tests). Redirected output is block-buffered — it
-  can look hung when it is not.
-- **Do not run heavy GPU work while the user is testing the console.**
-  `golden_eval` alongside `pytest` caused an Ollama CUDA host-buffer OOM.
-- **Outbound HTTPS on this box was badly degraded for most of this session**:
-  connections established in ~40ms but response *bodies* stalled until timeout,
-  on every host tested (Google, HuggingFace, Microsoft's speech endpoint). Edge
-  TTS was unusable-to-flaky throughout. If clause synthesis is timing out, test
-  the network before suspecting the code — §3C bounds the damage but cannot
-  create audio out of a dead link.
-
-### Probes
-
-- `backend/scripts/turn_probe.py` — one real turn over the websocket, when each
-  clause's TEXT and AUDIO arrive, with gaps. **Caveat: it sends the caller turn
-  ~1s after `call_started`, while `prewarm()` is still running and while a real
-  caller would still be listening to 7.85s of greeting.** Its turn-1 numbers are
-  therefore pessimistic and its contention is an artefact. Making it wait out
-  the greeting's audio duration was drafted and not applied.
-- `backend/scripts/edge_probe.py` — sequential vs concurrent Edge synthesis.
-- Scratchpad probes worth recreating (`…/scratchpad/`, session-scoped):
-  `llm_bench.py` (Ollama `/api/chat` direct — the only way to see
-  `prompt_eval_duration` and the wall-clock gap that exposed §3A),
-  `turn_bench.py` (production path, no websocket/TTS — the cleanest
-  time-to-first-clause instrument), `ctx_sweep.py`, `convo_probe.py`
-  (scripted multi-turn call over the websocket).
-
-Both need `sys.stdout.reconfigure(encoding="utf-8")` on this box or they die on
-Tamil output with a cp1252 error.
+- **The ASR is Tamil-only.** English hospital words come back transliterated
+  (`appointment` → `அப்பாயின்மென்ட்`) and dictated numbers come back as number
+  *words*, in Tamil **or** English (`நீன் ஏஐட் போர் ஜெரோ...` = 9840...).
+  `backend/transcript_norm.py` rewrites both over the hospital's closed
+  vocabulary. **A new trigger word needs adding there, and to the intent router
+  in both scripts.** Unknown words pass through untouched by design — fuzzy
+  matching over Tamil script would eventually mangle a real Tamil word, which
+  is worse than leaving one English word transliterated.
+- **Two debounces sit on top of TEN VAD, and they are load-bearing.** One
+  flagged 16 ms hop is not a turn. Measured over the 87 real captured turns in
+  `call_events.db`, **46 transcribed to 3 characters or fewer and 34 to the
+  EMPTY STRING** - 39% of everything the VAD opened held no speech at all, and
+  each of those still ran the ASR and was free to cancel the agent. So:
+  `vad_start_frames` consecutive hops open a turn (candidate audio is kept, so
+  nothing is clipped), and `vad_resume_frames` consecutive hops are needed to
+  restart the endpoint countdown - resetting it on a single hop is what let
+  background noise hold the microphone open indefinitely.
+- **Loudness gates turn ONSET, and only onset.** `vad_onset_min_rms` and
+  `vad_onset_snr` are read in exactly one place — the not-yet-in-speech branch
+  of `process()` — so a television or a conversation across the room cannot
+  start a turn. Once a turn is open, endpointing is the VAD flag alone.
+  **That split is the whole design, and it is a scar.** An energy gate applied
+  to EVERY frame was tried and reverted: a quiet trailing syllable scored as
+  "silence", the endpoint countdown ran on through the middle of a word, and
+  turns came back as one-character transcripts (`ந`, `ப`, `க`). Loudness may
+  refuse to START a turn; it must never be able to END one. Guarded by
+  `test_a_quiet_syllable_can_never_end_a_turn_that_is_already_open`, verified
+  to fail when the gate is moved into the in-speech branch.
+  Measured, per 16 ms frame of real Tamil speech at full digital level:
+  voiced p10 **931**, p50 **2624**, peak **9804** — so the 200 default is a
+  backstop about 4.6x below the quietest speech, not a filter. The SNR term is
+  the part that adapts, and the noise floor learns only from frames the VAD
+  calls non-speech, so a talking caller can never raise the bar against
+  themselves.
+- **A Latin word hyphenated to a Tamil suffix is dropped by the TTS voice.**
+  `Cardiology-ல` synthesises 0.28s of speech; `Cardiology ல` synthesises 1.10s.
+  `tts.speakable()` handles it on the synthesis path only — the transcript
+  keeps the hyphen. Do not "clean that up".
+- **`TTS_RATE` defaults to `+10%`.** This is slightly slower than the earlier
+  +15% setting for clarity. Measured on a real reply: +0% = 6.12s of audio,
+  +10% = 5.57s, +15% = 5.33s, +25% = 4.92s. Edge padding is trimmed to an
+  80 ms inter-clause pause (`TTS_CLAUSE_PAUSE_SECONDS=0.08`).
+  Past ~+25% the Tamil starts to clip, and callers here are often elderly.
+- **Edge TTS is a network call** and this box's link to it degrades
+  intermittently. The greeting and any repeated line are cached and unaffected;
+  novel clauses can be slow or clipped while the link is bad. Check
+  `logs/server.log` before suspecting the code.
+- **`backend/tools.py` is dead at runtime** — nothing in the runtime imports it.
+  It is kept as the reference for restoring tools per-flow later, and its
+  seeded records are still used by an exemplar-disjointness test.
+- **OUT OF SCOPE:** live SIP. `backend/telephony.py` gets fixes that are
+  one-line-identical to `main.py`'s but is not otherwise developed.
 
 ---
 
-## 8. NEXT, IN PRIORITY ORDER
+## 6. INVARIANTS — each has already cost a session
 
-**A. Get a trustworthy `golden_eval`.** Still nobody's seen one. Started this
-session at `LLM_TEMPERATURE=0`, killed at flow 6/20 to free the GPU — and
-`golden_eval` prints verdicts only at the end, so the partial run scores
-nothing. Budget ~2h, alone, nothing else on the GPU. This is the gate on §6 and
-on any further prompt surgery.
-
-**B. The two-questions-per-turn failure (§5).** The one quality flaw with
-repeated evidence behind it. Read §5's two directions before choosing one.
-
-**C. Verify §3B and §3D on a live call.** Both are unit-tested and neither has
-been heard. Specifically: does 240 ms feel right for barge-in on a real mic
-(`VAD_BARGE_IN_FRAMES` is the knob), and does the holding line land naturally
-or sound canned when the model was about to speak anyway.
-
-**D. TTS off the network.** Now a *reliability* problem as well as the PHI one:
-§7 shows the product goes mute when the link degrades. Nothing local is
-installed — no Tamil SAPI voice on this box, nothing in the HF cache. The
-obvious candidate is `facebook/mms-tts-tam` (VITS via `transformers`, ~145MB,
-CPU-capable, `torch` already installed), but it needs a download that the
-degraded link could not complete, and a human has to judge the Tamil voice.
-Not a solo decision.
-
-**E. `lookup_patient` returning `appointment_id`** (`tools.py`, landed last
-session) is still unverified against a live model.
-
----
-
-## 9. INVARIANTS — each has already cost a session
-
-- `_LANGUAGE_REMINDER` in `conversation.py` **must name "call a tool" BEFORE
-  its speaking rules.** A trailing speech-only instruction suppresses tool
-  calling entirely. No unit test catches this — they all use a scripted LLM.
-- The model keeps the **LAST** sentence of the exemplar turn it copies. Put
-  what must survive at the END.
-- Exemplar facts must stay disjoint from **both** `tools.py`'s `MockHospitalDb`
-  **and** `golden/flows/*.txt`. Two separate invariant tests guard two different
-  failure modes (silent memorisation vs. a fake PASS) — do not merge them.
+- The core prompt must **lead with the agent's job**, not with what it cannot
+  do. Leading with the limitation made the agent answer a booking request with
+  "book பண்ண முடியாது". Guarded.
+- Exemplar facts must stay disjoint from **both** `tools.py`'s seeded records
+  **and** `golden/flows/*.txt`. Two tests, two different failure modes (silent
+  memorisation vs. a fake PASS) — do not merge them.
+- An exemplar that never demonstrates **asking** for a slot will have the model
+  fill that slot from the exemplar's own facts.
 - Grounding deliberately does **not** count the system prompt as a source. The
-  exemplars live there, and treating them as provenance is exactly how a
-  parroted MRN passes for a real lookup.
-- TTS clause audio must be sent by a consumer **independent of clause arrival**
-  (PART 8). Draining inline reintroduces the stall.
-- Barge-in must be gated on **sustained** speech, never on `speech_started`
-  (§3B). One frame is a cough.
-- `HOLDING_LINE` goes into `spoken`, never into `session.messages` (§3D).
-- Never `localhost` (§3A).
-- **OUT OF SCOPE:** telephony / live SIP. `backend/telephony.py` gets fixes that
-  are one-line-identical to `main.py`'s (both barge-in call sites were fixed
-  together) but is not otherwise being developed. Testing is manual via
-  `http://localhost:8000/console`.
+  exemplars live there.
+- TTS clause audio must be sent by a consumer **independent of clause arrival**.
+  Draining inline reintroduces the stall.
+- Barge-in must be gated on **sustained** speech, never on `speech_started`.
+  One frame is a cough.
+- `MAX_HISTORY_MESSAGES` bounds the transcript. Without it a long call
+  overflows `num_ctx` and Ollama truncates from the front, taking the language
+  rules with it.
+
+---
+
+## 6a. THE INTENT ROUTER — measured, and what a statistical one cost
+
+The router picks WHICH of the 20 playbooks the model is shown. A miss degrades
+to `info.general`, which contains no guidance for whatever was actually asked.
+
+Measured on 46 realistic hospital turns across all 20 flows:
+
+| | routed correctly |
+|---|---|
+| before | **29/46 (63%)** — 11 matched nothing, 6 hit the wrong flow |
+| after | 46/46 on that set, **17/20 on held-out data** |
+
+Two structural bugs, both now guarded:
+
+- **`appointment.confirm` and `postprocedure.checkin` had no pattern at all.**
+  Twenty playbooks were parsed and eighteen were reachable. "Is my appointment
+  confirmed?" matched `appointment.book` and the agent tried to take a fresh
+  booking. `test_every_playbook_can_actually_be_reached_by_the_router` now
+  fails the moment a flow is added without a trigger — that failure is
+  otherwise silent.
+- **`charge` had no word boundary, so it matched inside DIScharge**, sending
+  "discharge summary copy வேணும்" to billing instead of records.
+
+**A derived statistical router was built and REJECTED.** Scoring a turn against
+per-flow token profiles built automatically from the playbooks and the
+exemplars' caller turns — the obvious answer to "stop hardcoding patterns" —
+measured **52–57%, worse than the 63% regex it would have replaced**, at every
+threshold tried. The cause is data volume: two or three exemplar caller turns
+per flow, and playbook bodies that share most of their vocabulary. Same class
+of failure as the fuzzy ASR normaliser in §6c, and rejected for the same
+reason. The prototype is not in the repo.
+
+**Held-out validation is what caught a regression.** Tuning patterns against
+the 46-turn set scored 100%, which is meaningless — those turns were what the
+patterns were written against. Re-running against the exemplars' own opening
+turns (never looked at while writing patterns) exposed a new
+`ரெண்டு தடவை` ("twice") trigger on the angry-escalation flow hijacking
+*"charged twice"*, an ordinary billing dispute. Always measure on turns you
+did not write.
+
+The three still unrouted are exemplar openers for OUTBOUND calls
+("ஆமாம் ஞாபகம் இருக்கு" — "yes, I remember"). They are answers, not requests;
+nothing in them names a flow, and the sticky-intent rule in `CallSession`
+covers them.
+
+---
+
+## 6b. LATENCY IS AT THE HARDWARE FLOOR — measured, stop looking
+
+Three separate attempts, all measured, all dead ends. Do not repeat them.
+
+| Attempt | Result |
+|---|---|
+| `FIRST_CHUNK_MAX_CHARS` 32 -> 24 -> 18 | **No change.** 2.38s / 2.43s / 2.43s to first clause. The model's first sentence ends at a period (`கண்டிப்பா சார்.` = 15 chars) long before the 32-char cap applies, so the knob never fires. At 12 it finally moved (2.37 -> 1.89s) but only by cutting mid-phrase, dropping `சார்.` |
+| openai SDK vs raw Ollama SSE | **Identical.** 9.0 vs 9.1 tok/s. The client adds nothing; rewriting `llm.py` to use raw httpx would buy zero. |
+| `OLLAMA_NUM_PARALLEL` | **Already 1.** The server log confirms one slot with the full `n_ctx 8192`. Flash-attention, q8_0 and keep-alive are all applied. |
+
+Where a turn actually goes, measured on the production path:
+
+    time to first TOKEN     0.42s (warm)  /  1.09s (turn 1, flow re-eval)
+    generating first clause 1.35s
+    -> first clause         1.79s (warm)  /  2.42s (turn 1)
+
+Generation streams at **9 tok/s**, against 14.5 tok/s for the same prompt
+non-streamed. That gap is llama.cpp flushing per token, not our code. It is the
+floor on this hardware. Real fixes are more VRAM or a smaller quantisation
+(measure `register_eval` before and after).
+
+The one lever that DID work is `TTS_RATE` - see below.
+
+---
+
+## 6c. GENERALISING THE ASR NORMALISER — prototyped, MEASURED, rejected
+
+`backend/transcript_norm.py` uses a lookup table, and the obvious objection is
+that it is hardcoded. A general replacement was built and measured:
+
+  1. derive the vocabulary automatically from the prompt files (1570 Latin
+     words - so a new department in the prompt would work for free),
+  2. transliterate the Tamil token with a script-level table,
+  3. fold the distinctions Tamil cannot express (p/b, k/g, t/d), fuzzy match.
+
+**It is worse than the table on both axes.** Against the measured ASR outputs:
+
+| variant | recovered | corrupted real Tamil |
+|---|---|---|
+| fuzzy, vowels dropped | 6/14 | **8/12** - `வணக்கம்`→"income", `மருந்து`→"rent" |
+| fuzzy, vowel positions kept | 8/14 | **3/12** - `எனக்கு`→"intake", `சொல்லுங்க`→"silence" |
+| exact canonical match only | 5/14 | **2/12** - `சொல்லுங்க`→"silence", `டெஸ்ட்`→"dust" |
+
+Even the strictest variant corrupts `சொல்லுங்க` ("tell me"), which appears in
+almost every caller turn. Turning a caller's real word into the wrong English
+word is far worse than leaving one English word transliterated - the table's
+whole design principle.
+
+If you retry this: the failure is that Tamil script is lossy for English
+(no b/g/d, unreliable vowels), so short tokens collide. A better direction is
+FORWARD transliteration - generate expected Tamil forms from the derived
+English vocabulary and accept only exact hits - which cannot invent a match for
+a word that no English source produced. Not attempted.
+
+### The retry, in that direction, and what shipped
+
+`backend/scripts/build_asr_lexicon.py`. It does not transliterate by rule at
+all - it ROUND-TRIPS: speak the English word with the agent's own Tamil voice,
+transcribe it with the caller's own ASR, record what came back. A rule guesses
+`appointment` as `அப்பொஇன்ட்மென்ட்`; the model actually emits
+`அப்பாயின்மென்ட்`, and only the model knows that.
+
+Nothing about the vocabulary is hand-maintained. It is every Latin word in
+`golden/`, so a department added to the prompt is covered by the next build.
+
+The hazard is that `golden/` also writes plenty of Tamil in Latin letters
+(`aamaam`, `aduttha`, `appadi`, `aiyo`), and round-tripping those would teach
+the normaliser to rewrite real Tamil into Latin - the exact corruption above.
+Two derived screens stop it, no word lists:
+
+1. **The code-mix register.** This prompt teaches Tamil-English code-mix, so a
+   real English word appears as a Latin island inside a Tamil-script sentence
+   (`எனக்கு appointment book பண்ணணும்`), while romanised Tamil appears in lines
+   that are romanised throughout. Requiring Tamil script on the SAME LINE keeps
+   the first and drops the second. Measured on 16 hand-picked words of each
+   kind: **romanised Tamil admitted 1/16, English kept 15/16.**
+2. **A similarity backstop**, for the one that got through. `அண்ணா` (elder
+   brother) scores 0.80 against `பண்ணா`; anything that close to a word the
+   agent writes in real Tamil is rejected. Deliberately strict - losing an
+   English word costs coverage, admitting a Tamil one costs correctness.
+
+Plus the original screens: exact collision with real Tamil, ambiguity (two
+English words producing one Tamil form), and a minimum length.
+
+The result is merged **under** the hand table, so a generated entry can only
+add coverage and never overwrite a measured one, and a missing or malformed
+`golden/asr_lexicon.json` degrades to exactly the hand table. Matching is
+still exact and whole-word: a form no English source produced cannot be
+matched, which is why the `சொல்லுங்க`->"silence" class of failure is
+structurally impossible here rather than merely unlikely.
+
+Rebuild after editing the prompt:
+
+```bash
+.venv/Scripts/python.exe -m backend.scripts.build_asr_lexicon
+```
+
+---
+
+## 7. OPEN
+
+1. ~~**Two questions in one turn**~~ — **guarded.** Prose failed three times;
+   the fix is deterministic and lives in `stream_utterance`. It is not a
+   truncation of the reply: measured against the real recorded calls, a
+   two-question turn arrives as two SEPARATE clauses, so the second is still
+   unspoken when it closes and can simply be withheld. Later NON-question
+   clauses are kept, because the closing handoff line usually follows the
+   question and dropping the tail wholesale would lose it. `?` is the same test
+   `register_eval` scores with, deliberately - one definition, so the guard and
+   the eval cannot disagree. The turn recorded in history is what was SPOKEN,
+   not what was generated, or the model believes it asked something the caller
+   never heard.
+2. **English mirroring** — see LLM_STACK.md §9. Attempted twice, reverted
+   twice, with the measurements.
+3. **TTS off the network** — still the right end state for both privacy and
+   reliability. `facebook/mms-tts-tam` was downloaded and **rejected**: its
+   vocabulary is 59 tokens with one Latin letter, so
+   `"Cardiology-ல appointment book பண்ணணும்"` tokenises to `"a ல a  பண்ணணும்"`.
+   It cannot speak code-mix. Do not retry it.

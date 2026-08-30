@@ -57,78 +57,102 @@ _INTENT_PATTERNS: list[tuple[str, str]] = [
     (
         "complaint.escalation_angry",
         r"மூணாவது\s*தடவை|மூன்றாவது|consumer\s*court|social\s*media|"
-        r"எத்தனை\s*தடவை|இன்னும்\s*வரல|காசு\s*வரல|refund\s*வரல|கத்த",
+        r"எத்தனை\s*தடவை|இன்னும்\s*வரல|காசு\s*வரல|refund\s*வரல|கத்த|"
+        r"manager|supervisor|மேனேஜர்|மூணு\s*தடவை\s*(call|கூப்பிட்|போன்)|"
+        r"respond\s*பண்ணல|யாரும்\s*(பதில்|respond|கேட்க)|ரொம்ப\s*அதிகம்",
     ),
     (
         "complaint.register",
-        r"complaint|புகார்|மோசமா\s*பேச|காக்க\s*வெச்|காத்திருந்த|சரி\s*இல்ல|rude|"
-        r"மரியாதை\s*இல்ல",
+        r"complaint|புகார்|மோசமா|காக்க\s*வெச்|காத்திருந்த|சரி\s*இல்ல|rude|"
+        r"மரியாதை\s*இல்ல|கம்ப்ளைண்ட்|service.{0,12}(மோசம்|சரி\s*இல்ல)",
+    ),
+    (
+        "postprocedure.checkin",
+        r"surgery\s*ஆகி|operation\s*ஆகி|operation.{0,6}அப்புறம்|surgery.{0,6}அப்புறம்|"
+        r"stitch|தையல்|dressing|drops\s*போட|discharge\s*ஆன|சர்ஜரி\s*ஆகி|"
+        r"ஆப்பரேஷன்.{0,8}அப்புறம்|post.?op|ஆபரேஷன்\s*ஆகி",
     ),
     (
         "clinical.triage",
-        r"காய்ச்சல|fever|வாந்தி|vomit|rash|தடிப்ப|வலிக்குது|"
-        r"என்ன\s*பண்றதுன்னு\s*தெரியல|உடம்பு\s*சரி\s*இல்ல",
+        r"காய்ச்சல|fever|வாந்தி|vomit|rash|தடிப்ப|வலிக்குது|வலி\s|\sவலி|"
+        r"என்ன\s*பண்றதுன்னு\s*தெரியல|உடம்பு\s*சரி\s*இல்ல|ஃபீவர்|வாமிட்|"
+        r"மயக்கம்|சளி|இருமல்|என்ன\s*பண்ணனும்",
     ),
     (
         "prescription.refill",
-        r"refill|தீர்ந்து|மாத்திரை\s*வேண|tablets?\s*வேண|மருந்து\s*வேண|stock\s*இல்ல",
+        r"refill|தீர்ந்து|மாத்திரை\s*வேண|tablets?\s*வேண|மருந்து\s*வேண|stock\s*இல்ல|ரீஃபில்|ரீபில்|டேப்லெட்|டாப்லெட்|மருந்து\s*தீர",
     ),
     (
         "medication.query",
         r"side\s*effect|தூக்கம்\s*வர|சாப்பிட்ட\s*பிறகு|எப்போ\s*சாப்பிட|dose|"
-        r"tablet.*பிரச்ச|மருந்து.*பிரச்ச",
+        r"tablet.*பிரச்ச|மருந்து.*பிரச்ச|சைட்\s*எஃபெக்ட்|டோஸ்|"
+        r"எப்படி\s*சாப்பிட|எத்தனை\s*தடவை\s*சாப்பிட|மாத்திரை.{0,12}எப்படி|"
+        r"மருந்து.{0,12}எப்படி|சாப்பிடணும்|சாப்பிடலாமா",
     ),
     (
         "lab.result_inquiry",
-        r"report\s*வந்த|result|report\s*கிடைக்|SMS\s*வரல|report\s*எப்போ|value",
+        r"report\s*வந்த|result|report\s*கிடைக்|SMS\s*வரல|report\s*எப்போ|value|ரிப்போர்ட்|ரிசல்ட்",
     ),
     (
         "lab.book",
         r"test\s*எழுதி|scan\s*book|blood\s*test|sample\s*எடுக்|ultrasound|scan\s*பண்ண|"
-        r"lab.*book|test.*book",
+        r"lab.*book|test.*book|டெஸ்ட்|ஸ்கேன்|ப்ளட்\s*டெஸ்ட்|சாம்பிள்|"
+        r"scan.{0,10}(appointment|வேண|book)|x.?ray|எக்ஸ்.?ரே|MRI|CT\s*scan",
     ),
     (
         "insurance.query",
-        r"insurance|policy|cover\s*ஆகும|cashless|pre.?auth|TPA|room\s*rent|co.?pay|claim",
+        r"insurance|policy|cover\s*ஆகும|cashless|pre.?auth|TPA|room\s*rent|co.?pay|claim|இன்சூரன்ஸ்|பாலிசி|கிளைம்",
     ),
     (
         "billing.query",
-        r"bill|charge|extra\s*போட்|itemised|itemized|EMI|தவணை|கட்டணம்|amount.*தப்ப",
+        r"bill|(?<!dis)charge|extra\s*போட்|itemised|itemized|EMI|தவணை|கட்டணம்|"
+        r"amount.*தப்ப|பில்|சார்ஜ்|எவ்வளவு\s*ஆகும்|எவ்வளவு\s*ஆச்|receipt|ரசீது|"
+        r"payment.{0,10}வரல|கட்டணம்",
     ),
     (
         "records.request",
         r"case\s*sheet|discharge\s*summary|records?\s*வேண|medical\s*records|"
-        r"copy\s*வேண|file\s*வேண",
+        r"copy\s*வேண|file\s*வேண|ரெக்கார்ட்|கேஸ்\s*ஷீட்|டிஸ்சார்ஜ்\s*சம்மரி",
     ),
     (
         "referral.status",
-        r"referral|வேற\s*hospital|letter.*எழுத|refer\s*பண்ண",
+        r"referral|வேற\s*hospital|letter.*எழுத|refer\s*பண்ண|ரெஃபரல்|ரிபரல்",
     ),
     (
         "patient.register",
-        r"register\s*பண்ண|புதுசா|new\s*patient|MRN\s*இல்ல|முதல்\s*தடவை|first\s*time.*register",
+        r"register\s*பண்ண|புதுசா|new\s*patient|MRN\s*இல்ல|முதல்\s*தடவை|first\s*time.*register|ரெஜிஸ்டர்|புது\s*பேஷண்ட்",
     ),
     (
         "appointment.followup",
-        r"follow.?up|review.*வர\s*சொன்|course\s*முடிஞ்|திரும்ப\s*வர\s*சொன்",
+        r"follow.?up|review.{0,12}வர|course\s*முடிஞ்|திரும்ப\s*வர\s*சொன்|ஃபாலோ\s*அப்|"
+        r"ஃபாலோஅப்|ரிவ்யூ|சொன்ன\s*மாதிரி\s*வர",
     ),
     (
         "appointment.reschedule",
         r"postpone|prepone|reschedule|date\s*மாத்த|நேரம்\s*மாத்த|வேற\s*date|"
-        r"அன்னைக்கு\s*வர\s*முடியா",
+        r"அன்னைக்கு\s*வர\s*முடியா|போஸ்ட்போன்|ரீஷெட்யூல்|தேதி\s*மாத்த|"
+        r"நாள்.{0,8}மாத்த|நாளுக்கு\s*மாத்த|வேற\s*நாள்|வேற\s*நேரம்",
     ),
     (
         "appointment.cancel",
-        r"cancel|ரத்து|வேணாம்.*appointment|appointment.*வேணாம",
+        r"cancel|ரத்து|வேணாம்.*appointment|appointment.*வேணாம|கேன்சல்|கான்சல்",
+    ),
+    (
+        "appointment.confirm",
+        r"confirm\s*(ஆயி|ஆச்|ஆகி|ஆன|பண்ணிட்)|appointment\s*இருக்கா|"
+        r"booking.{0,8}confirm|கன்ஃபர்ம்|கன்பர்ம்|appointment.{0,10}check\s*பண்ண|"
+        r"appointment.{0,10}உறுதி",
     ),
     (
         "appointment.book",
-        r"appointment|book\s*பண்ண|doctor.*பாக்க|consult|slot|சந்திக்க",
+        r"appointment|book\s*பண்ண|doctor.*பாக்க|consult|slot|சந்திக்க|அப்பாயின்|அபாயின்|"
+        r"புக்\s*பண்ண|டாக்டர.{0,4}\s*பாக்க|கன்சல்ட்|ஸ்லாட்|see\s+a\s+[\w\s]{0,16}doctor|"
+        r"time\s*வேண|நேரம்\s*வேண|டாக்டர்.{0,8}(வேண|இருக்கா)",
     ),
     (
         "info.general",
         r"timing|visiting\s*hours|parking|canteen|wheelchair|ICU|attender|"
-        r"எப்படி\s*வர|எத்தனை\s*மணி|எங்க\s*இருக்கு",
+        r"எப்படி\s*வர|எத்தனை\s*மணி|எங்க\s*இருக்கு|விசிட்டிங்|பார்க்கிங்|டைமிங்",
     ),
 ]
 

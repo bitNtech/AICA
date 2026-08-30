@@ -108,7 +108,7 @@ def test_build_includes_only_the_active_flows_exemplars() -> None:
     booking = builder.build("appointment.book")
 
     assert "HOW A REAL CALL SOUNDS" in booking
-    assert "Dr. Saravanan senior nephrologist" in booking
+    assert "appointment desk" in booking
     # Another flow's exemplar must not leak in and pull the model off-flow.
     # The sentinel is the emergency example's street address, not its
     # "Ambulance அனுப்பிட்டேன்" line: runtime_core.txt now quotes that line
@@ -280,18 +280,20 @@ def test_the_emergency_exemplar_dispatches_to_a_different_address_than_flow_18()
 _NARRATES_A_LOOKUP_RE = re.compile(r"ஒரு நிமிஷம்|check பண்றேன்|பாக்கறேன்|பாத்துடலாம்")
 
 
-def test_an_exemplar_that_narrates_a_lookup_also_shows_the_tool_step() -> None:
-    """A narrated lookup with no tool step teaches the exact failure we hit.
+def test_no_exemplar_narrates_a_lookup_the_agent_cannot_perform() -> None:
+    """The inverse of the guard this replaces.
 
-    Six flows used to say "பாக்கறேன் மேடம்" and then state a patient name, a
-    doctor, a referral stage or a refund amount that no tool had returned -
-    a worked example of narrating a database query and producing the answer
-    from nowhere. runtime_core.txt forbids it in words ("Never narrate a
-    lookup you did not perform"), and the model followed the example instead:
-    asked for a lab value three times it held the refusal that its exemplar
-    demonstrates, while the refusal that was only written as a rule collapsed.
+    While there WAS a tool layer, an exemplar that narrated a lookup merely
+    had to also show the tool step - otherwise it demonstrated narrating a
+    database query and then producing the answer from nowhere, and the model
+    copied exactly that. Six flows used to do it.
 
-    So wherever an exemplar narrates a lookup, it must also show the call.
+    There is no tool layer now, so a narrated lookup is not incomplete, it is
+    a lie: every one of them has to be gone, not paired with a tool step.
+    Exemplars are the specification on this model - a rule written AT a
+    behaviour has failed every time it was tried, a rule DEMONSTRATED has
+    held - so this is the check that actually holds the no-invention
+    property, not the prose in runtime_core.txt.
     """
     raw = json.loads(_EXEMPLARS.read_text(encoding="utf-8"))
 
@@ -299,13 +301,138 @@ def test_an_exemplar_that_narrates_a_lookup_also_shows_the_tool_step() -> None:
     for intent, exchanges in raw.items():
         if intent.startswith("_"):
             continue
-        narrates = any(
-            role == "agent" and _NARRATES_A_LOOKUP_RE.search(text) for role, text in exchanges
-        )
-        if narrates and not any(role == "tool" for role, _text in exchanges):
-            offenders.append(intent)
+        for role, text in exchanges:
+            if role == "agent" and _NARRATES_A_LOOKUP_RE.search(text):
+                offenders.append(f"{intent} narrates a lookup: {text[:50]}")
+        if any(role == "tool" for role, _text in exchanges):
+            offenders.append(f"{intent} still has a tool step")
 
     assert not offenders, (
-        "these exemplars narrate a lookup but never show the tool call, which "
-        "demonstrates inventing the result: " + ", ".join(sorted(offenders))
+        "the agent has no access to any hospital system, so these examples "
+        "teach it to invent the answer: " + "; ".join(sorted(offenders))
     )
+
+
+def test_the_core_prompt_leads_with_the_job_not_the_limitation() -> None:
+    """Observed live: the agent answered "appointment book பண்ண முடியாது" to a
+    caller asking to book one, and offered a callback instead of taking a
+    single detail.
+
+    The cause was ordering, not wording. The no-tool rewrite opened its section
+    with what the agent CANNOT do, and a 4B model reads the first thing in a
+    section as the thing to do. The agent's job - take the request down in full,
+    one question per turn - has to come first, and the handoff has to read as a
+    CLOSING move.
+    """
+    core = _RUNTIME_CORE.read_text(encoding="utf-8")
+
+    assert "## YOUR JOB" in core, "the core prompt no longer states the agent's job"
+    job = core.index("## YOUR JOB")
+    # Whatever the section says about limits must come after the job statement.
+    for phrase in ("state a fact only the system holds", "NEVER open with what you cannot do"):
+        assert phrase in core, f"the core prompt dropped: {phrase!r}"
+        assert core.index(phrase) > job, f"{phrase!r} is stated before the job it qualifies"
+
+    # And the refusal the model actually produced must be named as wrong.
+    assert "is a WRONG answer" in core
+
+
+def test_the_intent_router_matches_tamil_script_renderings() -> None:
+    """The ASR returns English hospital words in TAMIL script - a caller saying
+    "appointment book" is transcribed "அப்பாயின்மென்ட் புக்". The router used to
+    match only Latin, so four of six realistic spoken turns detected NOTHING and
+    fell back to the info.general playbook, which has no booking guidance at all.
+    That is what made the agent answer a booking request generically.
+    """
+    spoken = [
+        ("எனக்கு அப்பாயின்மென்ட் புக் பண்ணனும்", "appointment.book"),
+        ("டாக்டரை பாக்கணும்", "appointment.book"),
+        ("நேத்து டெஸ்ட் பண்ணேன். ரிப்போர்ட் வந்துடுச்சா?", "lab.result_inquiry"),
+        ("என் அப்பாவுக்கு டேப்லெட் தீர்ந்துடுச்சு", "prescription.refill"),
+        ("பில்-ல ஒரு சார்ஜ் தப்பா இருக்கு", "billing.query"),
+        ("அப்பாயின்மென்ட் கேன்சல் பண்ணணும்", "appointment.cancel"),
+        ("இன்சூரன்ஸ்-ல கவர் ஆகுமா", "insurance.query"),
+    ]
+    for utterance, expected in spoken:
+        assert detect_intent(utterance) == expected, (
+            f"{utterance!r} routed to {detect_intent(utterance)!r}, not {expected!r} - "
+            "the caller gets a playbook that cannot help them"
+        )
+
+    # A bare acknowledgement still must NOT re-route: conversation.py keeps the
+    # previous flow sticky precisely because these carry no trigger.
+    assert detect_intent("ஆமாம் சரி தான்") is None
+    assert detect_intent("98407 21534") is None
+
+
+# --- every flow must be REACHABLE, not just present ---
+
+
+def test_every_playbook_can_actually_be_reached_by_the_router() -> None:
+    """A playbook with no trigger is 20 flows' worth of prompt nobody can use.
+
+    Measured before this guard existed: `appointment.confirm` and
+    `postprocedure.checkin` had no pattern at all, so "is my appointment
+    confirmed?" matched `appointment.book` and the agent tried to take a fresh
+    booking instead of answering. Adding a flow to golden/main_prompt.txt
+    without a trigger is silent - the flow simply never runs - so this is the
+    test that makes it loud.
+    """
+    from backend.prompt_builder import _INTENT_PATTERNS
+
+    playbooks = parse_flow_playbooks(_MASTER_PROMPT.read_text(encoding="utf-8"))
+    routable = {intent for intent, _ in _INTENT_PATTERNS}
+    unreachable = sorted(set(playbooks) - routable - {DEFAULT_FLOW})
+
+    assert not unreachable, f"playbooks no caller turn can ever reach: {unreachable}"
+
+
+# A specific flow must beat the generic one it shares vocabulary with. Every
+# case here routed to the WRONG flow before these triggers existed, because
+# the generic pattern matched a word the specific request also contains
+# ("appointment", "scan", "charge" inside DIScharge).
+@pytest.mark.parametrize(
+    ("caller_turn", "expected", "was_previously"),
+    [
+        ("என் appointment confirm ஆயிடுச்சா", "appointment.confirm", "appointment.book"),
+        ("நாளைக்கு appointment இருக்கா-ன்னு check பண்ணுங்க", "appointment.confirm", "appointment.book"),
+        ("appointment-ஐ வேற நாளுக்கு மாத்தணும்", "appointment.reschedule", "appointment.book"),
+        ("scan-க்கு appointment வேணும்", "lab.book", "appointment.book"),
+        ("discharge summary copy வேணும்", "records.request", "billing.query"),
+        ("surgery ஆகி ஒரு வாரம் ஆச்சு, stitch வலிக்குது", "postprocedure.checkin", "clinical.triage"),
+    ],
+)
+def test_a_specific_request_outranks_the_generic_flow_it_overlaps(
+    caller_turn: str, expected: str, was_previously: str
+) -> None:
+    assert detect_intent(caller_turn) == expected
+
+
+# Ordinary hospital business, in the phrasings a caller actually uses. None of
+# these matched anything before; every one fell back to info.general, which
+# contains no guidance for the thing being asked.
+@pytest.mark.parametrize(
+    ("caller_turn", "expected"),
+    [
+        ("எவ்வளவு ஆகும்-னு தெரியணும்", "billing.query"),
+        ("இந்த மாத்திரை எப்படி சாப்பிடணும்", "medication.query"),
+        ("வயித்து வலி ரொம்ப இருக்கு, என்ன பண்ணனும்", "clinical.triage"),
+        ("service ரொம்ப மோசமா இருந்துச்சு", "complaint.register"),
+        ("manager-ஐ கூப்பிடுங்க, இது ரொம்ப அதிகம்", "complaint.escalation_angry"),
+        ("review-க்கு எப்ப வரணும்", "appointment.followup"),
+        ("I need to see a skin doctor", "appointment.book"),
+        ("operation-க்கு அப்புறம் எப்படி பாத்துக்கணும்", "postprocedure.checkin"),
+    ],
+)
+def test_ordinary_hospital_requests_reach_their_own_flow(caller_turn: str, expected: str) -> None:
+    assert detect_intent(caller_turn) == expected
+
+
+def test_a_billing_dispute_is_not_mistaken_for_an_angry_escalation() -> None:
+    """Regression: "charged twice" is a billing dispute, not "I called twice".
+
+    Caught by the exemplars' own opening turns when a "ரெண்டு தடவை" trigger was
+    added to the escalation flow - a reminder that generic count phrases belong
+    to whatever noun follows them.
+    """
+    assert detect_intent("Discharge bill-ல ஒரு charge ரெண்டு தடவை போட்டுருக்கீங்க") == "billing.query"

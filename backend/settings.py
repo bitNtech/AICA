@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,6 +32,57 @@ class AudioSettings:
 
     # Lower = catches softer/quieter onsets but more false triggers on noise.
     vad_threshold: float = float(os.getenv("VAD_THRESHOLD", "0.35"))
+
+    # TEN VAD flags speech per 16 ms hop, and ONE positive hop is not a turn.
+    # Measured over the 87 real captured turns in call_events.db, 46 of them
+    # transcribed to 3 characters or fewer and 34 to the EMPTY STRING - i.e.
+    # 39% of everything the VAD opened contained no speech at all. Requiring
+    # 4 consecutive positive hops (64 ms) before a turn opens removes the
+    # shortest of those without costing a real caller anything: the candidate
+    # frames are kept and prepended, so confirming an onset never clips the
+    # first syllable.
+    #
+    vad_start_frames: int = int(os.getenv("VAD_START_FRAMES", "4"))
+
+    # LOUDNESS AT ONSET. Only speech this loud may OPEN a turn, so a
+    # television, a fan or a conversation across the room no longer starts one.
+    #
+    # Read this before touching it. An energy gate was added here once before
+    # and reverted, because it gated EVERY frame: a quiet trailing syllable
+    # scored as "silence", the endpoint countdown ran on through the middle of
+    # a word, and turns came back as one-character transcripts ("ந", "ப", "க").
+    # The lesson was not that loudness is unusable, it is that loudness must
+    # never be allowed to END a turn - only to refuse to start one. So these
+    # two knobs are read in exactly one place, the not-yet-in-speech branch of
+    # TenVadSegmenter.process(). Once a turn is open, endpointing is decided by
+    # the VAD flag alone, and no quiet syllable can cut it short.
+    #
+    # Measured, per 16 ms frame of real Tamil speech at full digital level:
+    #
+    #     voiced p10   931      voiced p50  2624     peak  9804
+    #
+    # so 200 sits about 4.6x below the quietest speech frame - low enough to
+    # be a backstop rather than a filter, because microphone gain varies wildly
+    # between machines and an absolute number cannot be right for all of them.
+    # The SNR term is the part that actually adapts: the room's noise floor is
+    # learned continuously while nobody is speaking, and onset has to beat a
+    # multiple of it. Raise VAD_ONSET_SNR first if a noisy room still opens
+    # turns; raise VAD_ONSET_MIN_RMS only if the microphone is unusually hot.
+    vad_onset_min_rms: float = float(os.getenv("VAD_ONSET_MIN_RMS", "200"))
+    vad_onset_snr: float = float(os.getenv("VAD_ONSET_SNR", "3.0"))
+
+    # How fast the learned room-noise floor follows the room. Updated only
+    # while no turn is open AND the VAD says the frame is not speech, so a
+    # caller talking can never raise the bar against themselves.
+    vad_noise_ema: float = float(os.getenv("VAD_NOISE_EMA", "0.05"))
+
+    # Once the endpoint countdown has begun, only a sustained run of speech
+    # restarts it. Resetting on a SINGLE positive hop is what let background
+    # noise hold the microphone open indefinitely - one blip inside every
+    # 352 ms window and the turn never closes, which is why a caller ends up
+    # toggling their mic by hand after speaking. Real speech produces long
+    # runs and clears this instantly; an isolated blip now costs one frame.
+    vad_resume_frames: int = int(os.getenv("VAD_RESUME_FRAMES", "3"))
 
     # 8 x 16 ms = 128 ms kept *before* VAD fires, so VAD onset lag doesn't
     # clip the first syllable.
@@ -62,6 +114,25 @@ class AudioSettings:
     # captured and transcribed from its first frame either way.
     barge_in_speech_frames: int = int(os.getenv("VAD_BARGE_IN_FRAMES", "15"))
 
+    # The bar to interrupt the agent WHILE ITS OWN VOICE IS STILL AUDIBLE.
+    # 40 x 16 ms = 640 ms of unbroken speech.
+    #
+    # Echo cancellation is on in the browser and mostly works, but what leaks
+    # through is the agent's own sentence - and to a VAD that is not "noise",
+    # it is genuine sustained speech, just not the caller's. A consecutive-hop
+    # gate therefore cannot separate the two on its own, and this is why a
+    # caller who leaves the microphone open hears the agent cut itself off.
+    #
+    # Raising the bar can separate them, because the two behave differently:
+    # room noise and residual echo arrive in bursts, while a caller who
+    # actually wants the floor keeps talking. 640 ms is roughly two words - a
+    # deliberate interruption, not a reaction.
+    #
+    # This is only the gate for CUTTING THE AGENT OFF. The caller's utterance
+    # is still captured and transcribed from its first frame either way, so
+    # nothing they say is lost while this is waiting.
+    barge_in_frames_while_audible: int = int(os.getenv("VAD_BARGE_IN_FRAMES_WHILE_AUDIBLE", "40"))
+
     # ponytail: not in the reference CLI, which is a trusted local mic. A
     # browser socket is not: without a cap, a stuck speech flag buffers
     # forever. 30 s is far past any real turn, so it never truncates one.
@@ -86,6 +157,17 @@ class AudioSettings:
             raise ValueError("ASR_DECODING must be either 'ctc' or 'rnnt'")
         if self.asr_max_concurrency <= 0:
             raise ValueError("ASR_MAX_CONCURRENCY must be positive")
+        if self.vad_start_frames <= 0 or self.vad_resume_frames <= 0:
+            raise ValueError("VAD_START_FRAMES and VAD_RESUME_FRAMES must be positive")
+        if self.vad_onset_min_rms < 0 or self.vad_onset_snr < 1:
+            raise ValueError("VAD_ONSET_MIN_RMS must be >= 0 and VAD_ONSET_SNR must be >= 1")
+        if not 0 < self.vad_noise_ema <= 1:
+            raise ValueError("VAD_NOISE_EMA must be in (0, 1]")
+        if self.barge_in_frames_while_audible < self.barge_in_speech_frames:
+            raise ValueError(
+                "VAD_BARGE_IN_FRAMES_WHILE_AUDIBLE must be >= VAD_BARGE_IN_FRAMES - "
+                "interrupting must never be EASIER while the agent's own voice is in the room"
+            )
 
 
 @dataclass(frozen=True)
@@ -198,13 +280,75 @@ class TtsSettings:
     # latency. Lower it to 2 if TTS_ENGINE is switched to a local GPU model.
     max_concurrency: int = int(os.getenv("TTS_MAX_CONCURRENCY", "4"))
 
-    # A healthy "edge" clause synthesizes in ~1s. Past this the endpoint is
-    # stalling, and the sender is holding every LATER clause's audio behind it
-    # (the queue is ordered), so one stuck clause mutes the rest of the turn.
-    # Measured with the endpoint unreachable: no timeout meant 21s per clause.
-    # The text has already gone out, so giving up here costs the voice for one
-    # clause and keeps the conversation moving.
-    timeout_seconds: float = float(os.getenv("TTS_TIMEOUT_SECONDS", "5"))
+    # A healthy "edge" clause synthesizes in ~0.9s (measured, sequential AND
+    # 4-way concurrent). Past this the endpoint is stalling, and the sender is
+    # holding every LATER clause's audio behind it (the queue is ordered), so
+    # one stuck clause mutes the rest of the turn. Measured with the endpoint
+    # unreachable: no timeout at all meant 21s per clause.
+    #
+    # Was 5s, and that was too tight. On a degraded link every clause of a turn
+    # exceeded it and the caller got TOTAL SILENCE where the pre-timeout code
+    # had given slow-but-present speech - observed live, 100% of clauses across
+    # two turns. The bound has to be loose enough that "slow" still speaks.
+    # 10s is ~11x the healthy median, and it is paid ONCE per turn rather than
+    # once per clause: main.py synthesizes a turn's clauses concurrently, so
+    # they stall in parallel (see the "TTS send waited 5.03s ... 0.00s ... 0.00s"
+    # signature in the server log). tts.py also now keeps whatever bytes arrived
+    # before the deadline instead of discarding them.
+    timeout_seconds: float = float(os.getenv("TTS_TIMEOUT_SECONDS", "10"))
+
+    # Speaking rate, as edge's own +N%/-N% string. A hospital desk agent talks
+    # briskly; the default voice is slow enough to feel like a recording.
+    # Measured on a real reply ("நன்றி முருகேசன் சார். உங்க registered mobile
+    # number ஒரு தடவை சொல்லுங்களா?"):
+    #
+    #     +0%   6.12s      +20%  5.11s
+    #     +10%  5.57s      +25%  4.92s
+    #     +15%  5.33s      +30%  4.73s
+    #
+    # +10% is the slightly slower setting requested for clearer listening;
+    # callers to a hospital are often elderly or anxious. Raise it with
+    # TTS_RATE if the demo audience prefers faster; past about +25% the Tamil
+    # starts to clip.
+    #
+    # This also shortens every turn, so it is a latency win as well as a
+    # naturalness one: the caller stops waiting for the agent to finish sooner.
+    rate: str = os.getenv("TTS_RATE", "+0%")
+
+    # Edge PADS every clip it returns, and the padding is what the caller hears
+    # as a long gap after every full stop. Measured on real agent clauses at
+    # +15%, per clip:
+    #
+    #     total  lead  trail  voiced   clause
+    #      1.78  0.18   0.76    0.84   கண்டிப்பா சார்.
+    #      1.78  0.18   0.84    0.76   நன்றி சார்.
+    #      1.78  0.16   0.90    0.72   சரி சார்.
+    #      2.42  0.16   0.14    2.12   உங்க registered mobile number சொல்லுங்களா?
+    #      5.90  0.18   0.14    5.58   எல்லாம் குறிச்சுக்கிட்டேன் — ...
+    #
+    # Every clip opens with ~0.17s of silence, and a SHORT one is padded out to
+    # exactly 1.78s - so the shorter the clause, the longer the dead air behind
+    # it. A turn's clauses are synthesized separately and played back to back,
+    # so that padding accumulates at precisely the clause boundaries: 4.02s of
+    # silence across those six clauses, ~0.67s per boundary.
+    #
+    # Trimming to a fixed, deliberate pause is what makes the speech sound
+    # continuous. These are the two calibration knobs for it:
+    #
+    #   lead_trim  what is KEPT in front of the first voiced sample. Not zero:
+    #              cutting flush to the threshold clips the attack of a plosive
+    #              ("பில்", "டாக்டர்") and the word starts mid-consonant.
+    #   pause      the silence left AFTER the last voiced sample. This is the
+    #              inter-clause pause the caller actually hears. 0.08s reads as
+    #              one continuous sentence; raise it toward 0.3s if the speech
+    #              feels rushed to an elderly caller.
+    clause_lead_seconds: float = float(os.getenv("TTS_CLAUSE_LEAD_SECONDS", "0.04"))
+    clause_pause_seconds: float = float(os.getenv("TTS_CLAUSE_PAUSE_SECONDS", "0.08"))
+
+    # Frames quieter than this count as silence. Edge's padding is true digital
+    # silence, so almost any threshold separates it from speech; this one is
+    # low enough that a soft Tamil word-final vowel is never mistaken for it.
+    silence_threshold: float = float(os.getenv("TTS_SILENCE_THRESHOLD", "0.01"))
 
     def __post_init__(self) -> None:
         if self.language not in SUPPORTED_LANGUAGES:
@@ -213,6 +357,10 @@ class TtsSettings:
             raise ValueError("TTS_MAX_CONCURRENCY must be positive")
         if self.timeout_seconds <= 0:
             raise ValueError("TTS_TIMEOUT_SECONDS must be positive")
+        # edge rejects anything that is not exactly +N%/-N%, and it does so
+        # mid-call rather than at startup, so the shape is checked here.
+        if not re.fullmatch(r"[+-]\d+%", self.rate):
+            raise ValueError(f"TTS_RATE must look like '+15%' or '-10%', got {self.rate!r}")
         if self.engine not in {"edge", "svara"}:
             raise ValueError("TTS_ENGINE must be either 'edge' or 'svara'")
 

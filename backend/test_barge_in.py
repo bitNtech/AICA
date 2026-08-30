@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 
-from .barge_in import ActiveSpeech
+from .barge_in import AUDIBLE_TAIL_SECONDS, ActiveSpeech, is_probably_self_echo
 
 
 async def test_interrupt_with_no_active_task_is_a_no_op() -> None:
@@ -129,3 +129,138 @@ def test_a_noise_blip_does_not_interrupt_but_a_spoken_word_does() -> None:
         assert task.cancelled()
     finally:
         loop.close()
+
+
+def test_scattered_noise_never_accumulates_into_a_false_barge_in() -> None:
+    """The agent-goes-silent bug, at its root.
+
+    note_speech() used to count flagged frames without ever resetting on a
+    silent one, so isolated background blips summed across seconds of silence
+    and eventually cancelled the agent although nobody had spoken. The caller
+    then heard it stop mid-sentence and stay stopped - an empty transcript
+    (correctly) starts no new turn, so nothing was left to resume it.
+
+    Measured context: 34 of the 87 real captured turns in call_events.db
+    transcribed to the empty string, and every one of those was free to feed
+    this counter.
+    """
+
+    async def scenario() -> None:
+        speech = ActiveSpeech(sustained_frames=15)
+        task = asyncio.create_task(asyncio.sleep(10))
+        speech.set(task)
+
+        # Ten times as much noise as the gate requires - but never two
+        # flagged frames in a row.
+        for _ in range(150):
+            assert speech.note_speech(True) is False
+            assert speech.note_speech(False) is False
+
+        assert not task.cancelled() and not task.done(), "noise cancelled the agent"
+
+        # A real interjection is continuous, and must still land promptly.
+        interrupted = any(speech.note_speech(True) for _ in range(15))
+        assert interrupted, "a real 240ms interruption was not honoured"
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+# --- the agent hearing its own voice (mic left open, speakers on) ---
+
+
+def test_the_agent_knows_its_own_audio_is_still_playing() -> None:
+    """agent_speaking_end fires when SENDING finishes, not when the caller
+    stops hearing the agent - the client schedules clauses back to back."""
+    now = [1000.0]
+    speech = ActiveSpeech(15, 40, clock=lambda: now[0])
+
+    assert not speech.audible
+    speech.note_audio_sent(2.0)
+    speech.note_audio_sent(3.0)          # queued behind the first, not overlapping
+    assert speech.audible
+
+    now[0] += 4.9
+    assert speech.audible, "5s of audio was sent; it cannot be finished at 4.9s"
+    now[0] += 0.2 + AUDIBLE_TAIL_SECONDS
+    assert not speech.audible
+
+
+def test_interrupting_silences_the_room_immediately() -> None:
+    async def scenario() -> None:
+        now = [1000.0]
+        speech = ActiveSpeech(1, 1, clock=lambda: now[0])
+        task = asyncio.create_task(asyncio.sleep(10))
+        speech.set(task)
+        speech.note_audio_sent(10.0)
+        assert speech.audible
+
+        assert speech.interrupt() is True
+        # Cancelling drops the client's buffered playback, so nothing more is
+        # heard - leaving `audible` set would gate the NEXT turn wrongly.
+        assert not speech.audible
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+def test_interrupting_is_harder_while_the_agent_is_audible() -> None:
+    """Residual echo IS sustained speech - just not the caller's - so the
+    consecutive gate alone cannot separate it. More evidence can."""
+
+    async def scenario() -> None:
+        now = [1000.0]
+        speech = ActiveSpeech(15, 40, clock=lambda: now[0])
+        task = asyncio.create_task(asyncio.sleep(10))
+        speech.set(task)
+        speech.note_audio_sent(5.0)
+
+        # 39 unbroken frames of "speech" while the agent is talking: echo.
+        for _ in range(39):
+            assert speech.note_speech(True) is False
+        assert not task.cancelled(), "echo cut the agent off"
+        # A caller who genuinely wants the floor keeps going.
+        assert speech.note_speech(True) is True
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+def test_the_normal_gate_applies_once_the_room_is_quiet() -> None:
+    async def scenario() -> None:
+        now = [1000.0]
+        speech = ActiveSpeech(15, 40, clock=lambda: now[0])
+        task = asyncio.create_task(asyncio.sleep(10))
+        speech.set(task)
+        assert not speech.audible
+
+        for _ in range(14):
+            assert speech.note_speech(True) is False
+        assert speech.note_speech(True) is True, "15 frames must interrupt a silent agent"
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+def test_self_echo_is_recognised_but_a_real_caller_turn_is_not() -> None:
+    agent = "நன்றி சார். எந்த department-க்கு வேணும்?"
+
+    # The ASR mangles re-heard audio, so echo is a SUBSET of what was said.
+    assert is_probably_self_echo("எந்த department-க்கு வேணும்", agent)
+    assert is_probably_self_echo("நன்றி சார் எந்த department", agent)
+
+    # A real answer shares a word or two and must survive.
+    assert not is_probably_self_echo("எனக்கு Cardiology-ல appointment வேணும்", agent)
+    assert not is_probably_self_echo("என் பேரு முருகேசன், வயசு 58", agent)
+
+    # Never judge a short turn: refusing to hear a caller say yes is far worse
+    # than occasionally acting on an echo.
+    assert not is_probably_self_echo("ஆமாம்", agent)
+    assert not is_probably_self_echo("சரி சார்", agent)
+
+    # Nothing said yet, nothing to echo.
+    assert not is_probably_self_echo("எந்த department-க்கு வேணும்", "")

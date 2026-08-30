@@ -35,7 +35,7 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from backend.conversation import AgentTurn, ConversationManager, ToolInvoked
+from backend.conversation import AgentTurn, ConversationManager
 from backend.llm import LlmClient
 from backend.settings import ConversationSettings, LlmSettings
 
@@ -195,12 +195,6 @@ async def main() -> None:
                 reply = ""
                 claims: tuple[str, ...] = ()
                 async for event in manager.stream_utterance(connection_id, llm, turn):
-                    # Printed because two of these three cases turn on an
-                    # ACTION, not on wording: the emergency case is only safe
-                    # if dispatchAmbulance actually fired, and no regex over
-                    # the agent's words can see whether it did.
-                    if isinstance(event, ToolInvoked):
-                        print(f"  >>> TOOL {event.name}({event.arguments})")
                     if isinstance(event, AgentTurn):
                         reply, claims = event.text, event.unbacked_claims
             except Exception as error:

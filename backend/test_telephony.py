@@ -45,7 +45,7 @@ class _ScriptedLlm:
         self._replies = list(replies)
         self.calls: list[list[dict]] = []
 
-    async def stream(self, messages: list[dict], tools: list[dict]):
+    async def stream(self, messages: list[dict], tools: list[dict] | None = None):
         self.calls.append([dict(m) for m in messages])
         reply = self._replies.pop(0)
         for index in range(0, len(reply.content), 7):
@@ -215,12 +215,12 @@ def test_start_event_triggers_greeting_audio() -> None:
 def test_media_stream_drives_asr_conversation_tts_and_stop_cleans_up(monkeypatch) -> None:
     reply_text = "சரி appointment book பண்ணறேன்"
     transcript_text = "எனக்கு appointment வேணும்"
-    # 3 speech frames then enough trailing silence to close the VAD turn
-    # (default endpoint_silence_frames=30, matching test_vad.py's pattern).
+    # Enough scripted speech frames to clear the onset debounce, then enough
+    # trailing silence to close the turn.
     # Silence tail read from settings, not hard-coded: the segmenter closes
     # the turn after endpoint_silence_frames of silence, so a literal 30
     # here silently stops matching the moment that value is tuned.
-    speech_frames = 3
+    speech_frames = AudioSettings().vad_start_frames
     flags = [1] * speech_frames + [0] * AudioSettings().endpoint_silence_frames
 
     app, db_path = _build_app(

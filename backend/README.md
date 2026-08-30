@@ -97,14 +97,18 @@ TEN VAD and the turn-taking state machine use the hyperparameters the live-mic p
 |---|---|---|---|
 | hop size | - | `256` (16 ms) | VAD frame size; TEN VAD is tuned around 16 ms frames. |
 | threshold | `VAD_THRESHOLD` | `0.35` | Speech-probability cutoff. Lower catches softer onsets but false-triggers on noise. |
+| onset gate | `VAD_START_FRAMES` | `6` (96 ms) | Sustained voice-like frames required to open a turn; the candidate audio is retained. |
+| resume gate | `VAD_RESUME_FRAMES` | `3` (48 ms) | Sustained voice required to reset a trailing-silence timer, so isolated noise cannot hold a turn open. |
+| minimum energy | `VAD_MIN_RMS` | `80` | Absolute int16 RMS floor behind TEN VAD. |
+| room-noise ratio | `VAD_SNR_RATIO` | `1.8` | A speech flag must also clear the adaptively learned room-noise RMS by this multiple. |
 | pre-roll | `VAD_PRE_ROLL_FRAMES` | `8` (128 ms) | Silence buffered *before* VAD fires, prepended to the utterance so VAD onset lag does not clip the first syllable. |
 | endpoint silence | `VAD_ENDPOINT_SILENCE_FRAMES` | `22` (352 ms) | Consecutive silent frames that end a turn. Longer than a natural mid-sentence pause, so sentences are not cut in half. |
-| barge-in gate | `VAD_BARGE_IN_FRAMES` | `15` (240 ms) | Continuous speech required before the caller cuts the agent off. One flagged frame is a cough, not an interruption; capture and ASR are unaffected. |
+| barge-in gate | `VAD_BARGE_IN_FRAMES` | `10` (160 ms from confirmed onset; 240 ms total) | Additional consecutive speech required before the caller cuts the agent off. Silence resets the counter. |
 | max utterance | `ASR_MAX_UTTERANCE_FRAMES` | `1875` (30 s) | Safety cap only, far past any real turn - a browser socket must not buffer unbounded audio. |
 | language | `ASR_LANGUAGE` (or `?lang=`) | `ta` | `language_id` passed to IndicConformer: `ta`, `hi`, `te`, `ml`, `kn`, `bn`, `mr`, `gu`, `pa`. |
 | decoder | `ASR_DECODING` | `rnnt` | `rnnt` is slower than `ctc` but more accurate on this hybrid model - correctness over latency. |
 
-Each completed utterance (pre-roll + speech + the silent tail that ended the turn) is handed to NeMo as an in-memory float32 waveform in one `batch_size=1` call, in the language the connection was configured with. The audio never touches disk - no temp WAV write, decode, or unlink per turn, and the per-call progress bar is off; that is ~60 ms off every transcript on CPU. There is no per-utterance language detection: this checkpoint decodes whatever `language_id` it is given, so the call language is chosen once at `call_started`.
+The room-noise floor is learned continuously while the call is idle. TEN VAD, sustained-onset confirmation, and the adaptive energy gate must all agree before a turn starts. Each completed utterance (pre-roll + speech + the silent tail that ended the turn) is then handed to NeMo as an in-memory float32 waveform in one `batch_size=1` call, in the language the connection was configured with. The audio never touches disk - no temp WAV write, decode, or unlink per turn, and the per-call progress bar is off; that is ~60 ms off every transcript on CPU. There is no per-utterance language detection: this checkpoint decodes whatever `language_id` it is given, so the call language is chosen once at `call_started`.
 
 Transcripts are sent to the browser in the language's own script - Tamil speech arrives as Tamil text. There is no romanization ("Tanglish"/"Hinglish") step: it cost a dependency and a per-utterance conversion to make the output *less* faithful than what the model already produces.
 
