@@ -24,6 +24,7 @@ import type {
   UsageMetric,
   UserAccount,
 } from '../types'
+import { env } from '../lib/env'
 
 /**
  * Fixture data standing in for the backend API/websocket. AICA answers
@@ -182,8 +183,8 @@ export const supportNav: NavItem[] = [
 export const mockVendor = {
   name: 'BitnTech',
   tagline: 'AICA is designed and engineered by BitnTech.',
-  supportEmail: 'support@bitntech.com',
-  supportPhone: '+1 (415) 555-0148',
+  supportEmail: env.supportEmail,
+  supportPhone: env.supportPhone,
   website: 'www.bitntech.com',
   hours: 'Mon–Fri, 8am–7pm ET',
 }

@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTestCallSocket } from '../useTestCallSocket'
 import type { ServerEvent } from '../testCallProtocol'
+import { FakeBufferSource } from '../../test/setup'
 
 /** A fake WebSocket standing in for a real backend session — mirrors the
  * backend repo's own pattern of testing orchestration logic against a fake
@@ -21,7 +22,7 @@ class FakeWebSocket {
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string | ArrayBuffer }) => void) | null = null
   onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event: { code: number }) => void) | null = null
 
   url: string
 
@@ -35,8 +36,14 @@ class FakeWebSocket {
   }
 
   close() {
+    this.simulateClose(1000)
+  }
+
+  /** Server-side close. 4401 is the backend's auth rejection, sent before
+   * `accept()`, so it arrives without the socket ever having opened. */
+  simulateClose(code: number) {
     this.readyState = FakeWebSocket.CLOSED
-    this.onclose?.()
+    this.onclose?.({ code })
   }
 
   simulateOpen() {
@@ -143,6 +150,55 @@ describe('useTestCallSocket', () => {
     act(() => socket.simulateBinaryMessage(audio))
 
     expect(events).toEqual([{ type: 'agent_audio_chunk', audio }])
+  })
+
+  // Barge-in is the one behaviour that fails silently: a buffer whose start
+  // time is in the future has already been handed to the audio device, so
+  // resetting the playback clock leaves the agent talking over the caller.
+  // The hook owns the player precisely so no consumer can forget this.
+  it('stops every scheduled audio source when the caller starts talking', () => {
+    FakeBufferSource.created = []
+    const { result } = renderHook(() => useTestCallSocket({ url: 'ws://test' }))
+    act(() => result.current.connect())
+    const socket = FakeWebSocket.instances[0]
+    act(() => socket.simulateOpen())
+
+    act(() => socket.simulateMessage({ type: 'agent_speaking_start', sample_rate: 24000 }))
+    act(() => socket.simulateBinaryMessage(new Int16Array([1, 2, 3, 4]).buffer))
+    act(() => socket.simulateBinaryMessage(new Int16Array([5, 6, 7, 8]).buffer))
+
+    expect(FakeBufferSource.created).toHaveLength(2)
+    expect(FakeBufferSource.created.every((s) => s.stopped)).toBe(false)
+
+    act(() => socket.simulateMessage({ type: 'vad_start', probability: 0.9 }))
+
+    expect(FakeBufferSource.created.every((s) => s.stopped)).toBe(true)
+  })
+
+  it('reports a 4401 close as an auth rejection rather than a plain disconnect', () => {
+    const events: ServerEvent[] = []
+    const { result } = renderHook(() =>
+      useTestCallSocket({ url: 'ws://test', token: 'wrong', onEvent: (e) => events.push(e) }),
+    )
+    act(() => result.current.connect())
+    const socket = FakeWebSocket.instances[0]
+
+    act(() => socket.simulateClose(4401))
+
+    expect(result.current.connectionState).toBe('error')
+    expect(result.current.errorMessage).toMatch(/token/i)
+    expect(events.at(-1)).toMatchObject({ type: 'closed', code: 4401 })
+  })
+
+  // A second `call_started` on the same socket is a protocol error, and each
+  // extra socket gets its own greeting playing over the other. StrictMode's
+  // double-invoked effects make this a real failure mode, not a theoretical one.
+  it('ignores a re-entrant connect instead of opening a second call', () => {
+    const { result } = renderHook(() => useTestCallSocket({ url: 'ws://test' }))
+    act(() => result.current.connect())
+    act(() => result.current.connect())
+
+    expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
   it('surfaces backend error events as errorMessage', () => {
